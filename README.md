@@ -20,18 +20,23 @@ NHS data is public, but it's spread across different sources in different format
 Four stages, each one building on the last, plus a dashboard.
 
 ### 1. ETL (`etl/`)
+
 Loads the four raw datasets into a shared DuckDB database. Handles real messiness along the way: a dental billing code that split into three sub codes partway through 2022, and GP practices using a different area code system than hospitals do (a lookup table bridges the two). Each script can be re-run safely without creating duplicate rows.
 
 ### 2. Data quality checks (`dq/`)
+
 Flags months where row counts, missing values, or out of range numbers jump compared to the month before. Also checks per organisation, not just per dataset. A trust called The Walton Centre dropped out of the A&E data for one month. The dataset wide check missed it, since it was under 1% of total rows. The per organisation check caught it.
 
 ### 3. Changepoint detection (`cp/`)
+
 Looks for real shifts in A&E performance using two methods: simple statistical process control rules, and a changepoint algorithm (PELT) tuned by testing two cost models against each other on real data instead of guessing.
 
 ### 4. Cross dataset correlation (`corr/`)
+
 Checks whether A&E, RTT, prescribing, and dental data move together, at three levels: by region, by trust, and (only for trusts where a changepoint was already found) by the trust's local ICB. Matching trusts to ICBs took extra care, since NHS boundaries changed partway through this project. Details are in the code.
 
 ### Dashboard
+
 A Streamlit app for browsing all of the above, with a trust picker in the sidebar.
 
 **One known gap:** two of the dashboard's database views aren't created by any script in this repo yet. If you're setting this up from scratch, run these two commands before opening the dashboard's first page:
@@ -72,11 +77,13 @@ NHS/
 ## Setup
 
 Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 Run the pipeline, in order:
+
 ```bash
 python etl/run_all.py
 python dq/run_all.py
@@ -85,17 +92,20 @@ python corr/run_all.py
 ```
 
 Then match trusts to ICBs and run the last stage. This step calls the NHS ODS API once per trust, so it needs internet access and takes a few minutes:
+
 ```bash
 python corr/reference/trust_to_icb.py
 python corr/tier3_signal_driven.py
 ```
 
 Run the tests:
+
 ```bash
 python -m pytest tests/ -q
 ```
 
 Launch the dashboard (see the known gap note above first):
+
 ```bash
 streamlit run dashboard.py
 ```
@@ -107,4 +117,3 @@ streamlit run dashboard.py
 - [x] Changepoint detection
 - [x] Cross dataset correlation
 - [x] Dashboard
-- [ ] Plain English summaries written by an LLM. Left out on purpose until the statistics above were solid. Not started yet.
