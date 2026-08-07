@@ -1,0 +1,23 @@
+data/raw/
+data/processed/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Agent workspaces
+.claude/
+.gemini/
+
+# Testing
+.pytest_cache/
+
+# Generated outputs
+*.png
+
+# Virtual environments
+venv/
+
+# Agent documentation
+CLAUDE.md
+.venv/
+env/
