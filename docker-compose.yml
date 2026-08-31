@@ -1,0 +1,30 @@
+services:
+  # Runs the four pipeline stages in dependency order, then exits. The DuckDB file
+  # it produces lands in the bind-mounted ./data, so the dashboard service below
+  # reads the same database from the host.
+  pipeline:
+    build: .
+    image: nhs-monitoring-copilot:latest
+    volumes:
+      - ./data:/app/data
+    # Tier 3 is not run here. corr/reference/trust_to_icb.py calls the NHS ODS API
+    # once per trust, so it needs outbound network and several minutes; run it
+    # deliberately rather than on every `compose up`:
+    #   docker compose run --rm pipeline sh -c     #     "python corr/reference/trust_to_icb.py && python corr/tier3_signal_driven.py"
+    command: >
+      sh -c "python etl/run_all.py &&
+             python dq/run_all.py &&
+             python cp/run_all.py &&
+             python corr/run_all.py"
+
+  dashboard:
+    build: .
+    image: nhs-monitoring-copilot:latest
+    ports:
+      - "8501:8501"
+    volumes:
+      # Read-only: the dashboard queries the database, it never writes to it.
+      - ./data:/app/data:ro
+    depends_on:
+      pipeline:
+        condition: service_completed_successfully
