@@ -10,6 +10,18 @@ l2+BIC standardised on after comparing it against rbf+1.2 across 10 trusts
 (R1H, R0A, plus 8 more spanning low/high variance): 3 wins / 4 ties / 0
 losses for l2+BIC, with rbf+1.2 missing real shifts on R0A, G0Q0L, and
 R1K. Reverted from the earlier rbf+1.2 configuration for that reason.
+
+Known limitation: this runs on 13 monthly observations per trust. The A&E
+extract currently covers 2024-03 to 2025-03, so 194 of 200 trusts have a full
+13-point series and the remaining 6 have fewer; the RTT extract spans the same
+13 months. That is below what PELT comfortably supports. With
+MIN_SEGMENT_SIZE = 3 a full series admits at most three changepoints, and the
+BIC penalty is estimated from the same handful of points it is meant to
+regularise, so a detected changepoint here should be treated as provisional
+rather than established, and an undetected one is at least as likely to be a
+power problem as a genuine absence. Extending the A&E and RTT extracts to
+48-60 months is the intended fix; until then the two constants below are doing
+more work than their values suggest.
 """
 import sys
 from pathlib import Path
@@ -29,6 +41,10 @@ from cp.signals import (
 DATASET = "ae_attendances"
 METHOD = "pelt_changepoint"
 
+# Both are load-bearing at the current 13-month series length (see the known
+# limitation above): MIN_POINTS excludes the 2 of 200 trusts whose series is
+# shorter than 6 months, and at n=13 MIN_SEGMENT_SIZE is what caps detection at
+# three changepoints. Neither has been tuned against a longer series.
 MIN_POINTS = 6         # PELT needs enough points either side of a candidate breakpoint to be meaningful
 MIN_SEGMENT_SIZE = 3   # minimum months between changepoints
 
