@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install ruff==0.6.9
+      - run: ruff check .
+
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+
+      # data/raw/ and data/processed/ are gitignored, so the tests that need real
+      # NHS extracts skip here by design. -ra prints every skip reason, so this job
+      # reports how much of the suite actually ran rather than showing a green tick
+      # over a mostly-skipped suite.
+      - name: Run tests
+        run: pytest -q -ra
+
+      # Guard against the suite silently hollowing out: if a refactor makes the
+      # hermetic tests stop collecting, this fails rather than passing vacuously.
+      - name: Assert hermetic coverage floor
+        run: |
+          PASSED=$(pytest -q 2>&1 | tail -1 | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+')
+          echo "Hermetic tests passed: $PASSED"
+          if [ "${PASSED:-0}" -lt 70 ]; then
+            echo "::error::Only $PASSED tests ran without data; expected at least 70."
+            exit 1
+          fi
+
+  docker:
+    name: docker build
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t nhs-monitoring-copilot:ci .
+      - name: Dashboard starts and serves its health endpoint
+        run: |
+          docker run -d --name nhs-ci -p 8501:8501 nhs-monitoring-copilot:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8501/_stcore/health >/dev/null; then
+              echo "dashboard healthy"; docker rm -f nhs-ci; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::dashboard did not become healthy"
+          docker logs nhs-ci
+          docker rm -f nhs-ci
+          exit 1
