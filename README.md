@@ -2,7 +2,7 @@
 
 A pipeline that pulls together four public NHS datasets and automatically flags things worth looking at: data quality problems, sudden performance shifts, and patterns that show up across datasets at the same time.
 
-Built with Python and DuckDB, with a Streamlit dashboard on top. No AI or language models are used for detection. Every signal comes from a statistical test, not a model guess.
+Built with Python and DuckDB, with a Streamlit dashboard on top.
 
 ## What A&E is
 
@@ -62,7 +62,6 @@ Checks whether A&E, RTT, prescribing, and dental data move together, at three le
 ### Dashboard
 
 A Streamlit app for browsing all of the above, with a trust picker in the sidebar.
-
 
 ## Datasets
 
