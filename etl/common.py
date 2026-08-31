@@ -36,7 +36,7 @@ def create_dim_date(conn, start_date: str = "2020-01-01", end_date: str = "2025-
         })
         current = current + relativedelta(months=1)
 
-    df = pd.DataFrame(dates)
+    df = pd.DataFrame(dates)  # noqa: F841 — referenced by name in SQL below
     conn.execute("""
         CREATE OR REPLACE TABLE dim_date AS
         SELECT

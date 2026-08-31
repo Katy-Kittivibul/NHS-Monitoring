@@ -57,5 +57,5 @@ def write_corr_signals(conn, tier: str, dataset_pair: str, signals: list[dict]):
     conn.execute("DELETE FROM corr_signals WHERE tier = ? AND dataset_pair = ?", [tier, dataset_pair])
     if not signals:
         return
-    df = pd.DataFrame(signals)
+    df = pd.DataFrame(signals)  # noqa: F841 — referenced by name in SQL below
     conn.execute("INSERT INTO corr_signals SELECT * FROM df")

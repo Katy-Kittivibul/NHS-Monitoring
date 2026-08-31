@@ -72,7 +72,7 @@ def write_tier3_signals(conn, table: str, trust_code: str, signals: list[dict]):
     conn.execute(f"DELETE FROM {table} WHERE trust_code = ?", [trust_code])
     if not signals:
         return
-    df = pd.DataFrame(signals)
+    df = pd.DataFrame(signals)  # noqa: F841 — referenced by name in SQL below
     conn.execute(f"INSERT INTO {table} SELECT * FROM df")
 
 

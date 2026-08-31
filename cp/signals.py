@@ -49,7 +49,7 @@ def write_signals(conn, dataset: str, method: str, signals: list[dict]):
     conn.execute("DELETE FROM cp_signals WHERE dataset = ? AND method = ?", [dataset, method])
     if not signals:
         return
-    df = pd.DataFrame(signals)
+    df = pd.DataFrame(signals)  # noqa: F841 — referenced by name in SQL below
     conn.execute("INSERT INTO cp_signals SELECT * FROM df")
 
 
