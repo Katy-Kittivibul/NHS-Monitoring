@@ -7,14 +7,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from corr.signals import get_connection, ensure_corr_schema_exists, write_corr_signals
 from corr.correlation import rolling_correlation
 from corr.rollups import (
     get_ae_breach_pct_by_region,
-    get_rtt_over18wk_pct_by_region,
-    get_prescribing_items_by_region,
     get_dental_pct_achieved_by_region,
+    get_prescribing_items_by_region,
+    get_rtt_over18wk_pct_by_region,
 )
+from corr.signals import ensure_corr_schema_exists, get_connection, write_corr_signals
 
 TIER = "tier1_region"
 GEOGRAPHY_LEVEL = "region"

@@ -22,7 +22,9 @@ from scipy.stats import pearsonr
 WINDOW_MONTHS = 6
 
 
-def rolling_correlation(series_a: pd.DataFrame, series_b: pd.DataFrame, window: int = WINDOW_MONTHS) -> list[dict]:
+def rolling_correlation(
+    series_a: pd.DataFrame, series_b: pd.DataFrame, window: int = WINDOW_MONTHS
+) -> list[dict]:
     """Correlate two [key, month_date, value] series on a trailing `window`-month
     calendar window per key. Returns a list of
     {key, month_date, correlation_metric, detail} dicts, one per (key, month)

@@ -1,8 +1,15 @@
 from datetime import datetime
+from pathlib import Path
 
 import duckdb
 import pandas as pd
 from dateutil.relativedelta import relativedelta
+
+# Resolved relative to this module, not the CWD: this is a repo-tracked reference
+# file, so it must load identically whether the pipeline is run from the repo
+# root, from Docker (WORKDIR /app), or from pytest's rootdir. Same pattern as
+# corr/geography.py's DEFAULT_ICB_REGION_PATH.
+DEFAULT_SUB_ICB_MAPPING_PATH = str(Path(__file__).parent / "reference" / "sub_icb_to_icb.csv")
 
 
 def get_connection(db_path: str = "data/processed/nhs.duckdb"):
@@ -81,7 +88,7 @@ def create_dim_organisation(conn, org_data: pd.DataFrame = None):
     print(f"[OK] Created/updated dim_organisation: {len(org_data)} rows")
 
 
-def create_dim_sub_icb(conn, mapping_path: str = "etl/reference/sub_icb_to_icb.csv"):
+def create_dim_sub_icb(conn, mapping_path: str = DEFAULT_SUB_ICB_MAPPING_PATH):
     """Create/replace dim_sub_icb, the Sub ICB Location -> ICB bridge fact_prescribing
     needs to roll up cleanly (fact_prescribing.sub_icb_code is a Sub ICB code like
     "16C", not an ICB code like "QHM", so it can't join dim_organisation directly).

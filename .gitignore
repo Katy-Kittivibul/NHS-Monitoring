@@ -14,6 +14,11 @@ __pycache__/
 # Generated outputs
 *.png
 
+# Build artefacts
+build/
+dist/
+*.egg-info/
+
 # Virtual environments
 venv/
 

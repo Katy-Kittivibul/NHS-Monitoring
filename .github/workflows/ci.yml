@@ -6,10 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+# Only the newest run per branch is worth paying for; supersede the rest.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: ruff
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +31,7 @@ jobs:
   test:
     name: pytest
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,17 +46,26 @@ jobs:
       # data/raw/ and data/processed/ are gitignored, so the tests that need real
       # NHS extracts skip here by design. -ra prints every skip reason, so this job
       # reports how much of the suite actually ran rather than showing a green tick
-      # over a mostly-skipped suite.
+      # over a mostly-skipped suite. The output is kept so the floor check below can
+      # read it instead of running the whole suite a second time. pipefail is set
+      # explicitly: without it the pipe through tee would mask a failing pytest.
       - name: Run tests
-        run: pytest -q -ra
+        run: |
+          set -o pipefail
+          pytest -q -ra | tee pytest-output.txt
 
       # Guard against the suite silently hollowing out: if a refactor makes the
       # hermetic tests stop collecting, this fails rather than passing vacuously.
+      # Measured at 78 passed / 64 skipped with no data/ present (2026-08-31); the
+      # floor sits below that so ordinary additions don't trip it. If grep finds no
+      # count at all, PASSED falls back to 0 and this reports that, rather than
+      # dying on a non-zero grep and hiding the reason.
       - name: Assert hermetic coverage floor
         run: |
-          PASSED=$(pytest -q 2>&1 | tail -1 | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+')
+          PASSED=$(grep -oE '[0-9]+ passed' pytest-output.txt | tail -1 | grep -oE '^[0-9]+' || true)
+          PASSED=${PASSED:-0}
           echo "Hermetic tests passed: $PASSED"
-          if [ "${PASSED:-0}" -lt 70 ]; then
+          if [ "$PASSED" -lt 70 ]; then
             echo "::error::Only $PASSED tests ran without data; expected at least 70."
             exit 1
           fi
@@ -55,6 +74,7 @@ jobs:
     name: docker build
     needs: [lint, test]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Build image
