@@ -21,7 +21,7 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 
-from corr.geography import get_trust_region_map, get_icb_region_map  # noqa: E402
+from corr.geography import get_icb_region_map, get_trust_region_map  # noqa: E402
 
 
 def get_ae_breach_pct_by_region(conn) -> pd.DataFrame:

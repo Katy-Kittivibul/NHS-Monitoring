@@ -20,10 +20,10 @@ import numpy as np
 import ruptures as rpt
 
 from cp.signals import (
-    get_connection,
     ensure_cp_schema_exists,
-    write_signals,
     get_ae_breach_pct_series,
+    get_connection,
+    write_signals,
 )
 
 DATASET = "ae_attendances"

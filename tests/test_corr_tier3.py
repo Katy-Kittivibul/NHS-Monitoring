@@ -10,14 +10,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from corr.tier3_deltas import to_mom_delta
 from corr.tier3_signal_driven import (
+    CORRELATION_THRESHOLD,
     ensure_tier3_schema_exists,
-    write_tier3_signals,
-    resolve_trust_icb,
     get_question_b_eligible_trusts,
+    resolve_trust_icb,
     run_question_a,
     run_question_b,
     run_tier3,
-    CORRELATION_THRESHOLD,
+    write_tier3_signals,
 )
 from etl.common import get_connection
 

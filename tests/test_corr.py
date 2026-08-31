@@ -9,11 +9,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from corr.correlation import rolling_correlation
-from corr.geography import get_trust_region_map, get_icb_region_map
+from corr.geography import get_icb_region_map, get_trust_region_map
+from corr.run_all import run_all_corr
 from corr.signals import ensure_corr_schema_exists, write_corr_signals
 from corr.tier1_region import run_tier1_region_correlations
 from corr.tier2_trust import run_tier2_trust_correlations
-from corr.run_all import run_all_corr
 from etl.common import get_connection
 
 REAL_DB_PATH = "data/processed/nhs.duckdb"

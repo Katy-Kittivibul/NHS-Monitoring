@@ -5,14 +5,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dq.checks import (
-    get_connection,
-    ensure_dq_schema_exists,
-    write_flags,
-    check_row_count_jump,
     check_null_rate_jump,
-    check_out_of_range,
     check_org_missing_vs_prior_month,
     check_org_never_reported,
+    check_out_of_range,
+    check_row_count_jump,
+    ensure_dq_schema_exists,
+    get_connection,
+    write_flags,
 )
 
 DATASET = "dental_uda"

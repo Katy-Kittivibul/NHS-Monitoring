@@ -1,12 +1,12 @@
 from pathlib import Path
 
 import duckdb
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
+from plotly.subplots import make_subplots
 
 import dashboard_queries as q
 

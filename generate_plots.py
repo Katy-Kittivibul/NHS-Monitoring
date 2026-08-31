@@ -1,8 +1,9 @@
 import os
+
 import duckdb
+import matplotlib.pyplot as plt
 import numpy as np
 import ruptures as rpt
-import matplotlib.pyplot as plt
 
 # Ensure scratch directory exists
 os.makedirs(".gemini/scratch", exist_ok=True)

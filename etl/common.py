@@ -1,7 +1,8 @@
-import duckdb
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
+
+import duckdb
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 
 def get_connection(db_path: str = "data/processed/nhs.duckdb"):

@@ -1,17 +1,18 @@
 """Sanity checks for NHS ETL pipelines."""
-import pytest
 import sys
 from pathlib import Path
+
 import pandas as pd
+import pytest
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "etl"))
 
-from common import get_connection, ensure_schema_exists
-from ae_attendances import load_ae_attendances, parse_ae_period, etl_ae_attendances
-from rtt_waits import load_rtt_waits, parse_rtt_filename_date
-from prescribing import load_prescribing_data
+from ae_attendances import etl_ae_attendances, load_ae_attendances, parse_ae_period
+from common import ensure_schema_exists, get_connection
 from dental_uda import load_dental_uda_file, parse_dental_month
+from prescribing import load_prescribing_data
+from rtt_waits import load_rtt_waits, parse_rtt_filename_date
 
 
 class TestAEAttendances:

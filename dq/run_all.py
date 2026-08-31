@@ -4,11 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dq.checks import get_connection, ensure_dq_schema_exists
 from dq.ae_attendances import run_ae_attendances_dq
-from dq.rtt_waits import run_rtt_waits_dq
-from dq.prescribing import run_prescribing_dq
+from dq.checks import ensure_dq_schema_exists, get_connection
 from dq.dental_uda import run_dental_uda_dq
+from dq.prescribing import run_prescribing_dq
+from dq.rtt_waits import run_rtt_waits_dq
 
 
 def run_all_dq(db_path: str = "data/processed/nhs.duckdb"):

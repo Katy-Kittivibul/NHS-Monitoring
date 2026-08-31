@@ -39,13 +39,14 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 
-from etl.common import get_connection
-from cp.changepoints import detect_changepoints, MIN_POINTS as CP_MIN_POINTS
-from corr.correlation import rolling_correlation, WINDOW_MONTHS
-from corr.rollups import get_ae_breach_pct_by_trust
-from corr.tier3_rollups import get_prescribing_items_by_icb, get_dental_pct_achieved_by_icb
-from corr.tier3_deltas import to_mom_delta
+from corr.correlation import WINDOW_MONTHS, rolling_correlation
 from corr.reference.trust_to_icb import load_trust_to_icb
+from corr.rollups import get_ae_breach_pct_by_trust
+from corr.tier3_deltas import to_mom_delta
+from corr.tier3_rollups import get_dental_pct_achieved_by_icb, get_prescribing_items_by_icb
+from cp.changepoints import MIN_POINTS as CP_MIN_POINTS
+from cp.changepoints import detect_changepoints
+from etl.common import get_connection
 
 CORRELATION_THRESHOLD = 0.5  # |r| at/above this counts as "correlated" for Question A
 NO_DATA_ANCHOR = pd.Timestamp("2025-03-01")  # fallback month_date when an ICB has no rows at all

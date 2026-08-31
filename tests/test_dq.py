@@ -8,19 +8,19 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dq.ae_attendances import run_ae_attendances_dq
 from dq.checks import (
-    ensure_dq_schema_exists,
-    write_flags,
-    check_row_count_jump,
     check_null_rate_jump,
-    check_out_of_range,
     check_org_missing_vs_prior_month,
     check_org_never_reported,
+    check_out_of_range,
+    check_row_count_jump,
+    ensure_dq_schema_exists,
+    write_flags,
 )
-from dq.ae_attendances import run_ae_attendances_dq
-from dq.rtt_waits import run_rtt_waits_dq
-from dq.prescribing import run_prescribing_dq
 from dq.dental_uda import run_dental_uda_dq
+from dq.prescribing import run_prescribing_dq
+from dq.rtt_waits import run_rtt_waits_dq
 from dq.run_all import run_all_dq
 from etl.common import get_connection
 

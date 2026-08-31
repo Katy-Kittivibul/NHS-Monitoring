@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from corr.signals import get_connection, ensure_corr_schema_exists
+from corr.signals import ensure_corr_schema_exists, get_connection
 from corr.tier1_region import run_tier1_region_correlations
 from corr.tier2_trust import run_tier2_trust_correlations
 

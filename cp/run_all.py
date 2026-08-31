@@ -4,9 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cp.signals import get_connection, ensure_cp_schema_exists
-from cp.spc_baseline import run_spc_baseline
 from cp.changepoints import run_changepoints
+from cp.signals import ensure_cp_schema_exists, get_connection
+from cp.spc_baseline import run_spc_baseline
 
 
 def run_all_cp(db_path: str = "data/processed/nhs.duckdb"):

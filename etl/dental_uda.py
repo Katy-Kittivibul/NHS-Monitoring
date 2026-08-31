@@ -5,9 +5,11 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import pandas as pd
 from datetime import datetime
-from etl.common import get_connection, ensure_schema_exists  # noqa: E402 — after the sys.path shim above
+
+import pandas as pd
+
+from etl.common import ensure_schema_exists, get_connection  # noqa: E402 — after the sys.path shim above
 
 
 def parse_dental_month(year_month_str: str) -> datetime:

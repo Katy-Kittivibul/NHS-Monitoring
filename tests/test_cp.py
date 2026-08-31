@@ -9,10 +9,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cp.signals import ensure_cp_schema_exists, write_signals, get_ae_breach_pct_series
-from cp.spc_baseline import xmr_limits, rule1_beyond_3sigma, rule2_run_of_7, run_spc_baseline
 from cp.changepoints import COST_MODEL, DEFAULT_PENALTY, bic_penalty, detect_changepoints, run_changepoints
 from cp.run_all import run_all_cp
+from cp.signals import ensure_cp_schema_exists, get_ae_breach_pct_series, write_signals
+from cp.spc_baseline import rule1_beyond_3sigma, rule2_run_of_7, run_spc_baseline, xmr_limits
 from etl.common import get_connection
 
 REAL_DB_PATH = "data/processed/nhs.duckdb"
