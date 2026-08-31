@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nhs-monitoring-copilot"
+version = "0.1.0"
+description = "Cross-dataset signal detection over four public NHS datasets (ETL, data quality, changepoints, correlation)."
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Runtime pins live in requirements.txt and are installed with
+# `pip install -r requirements.txt`. They are deliberately not duplicated here:
+# two dependency lists drift, and the pinned file is what CI and Docker install.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.4",
+    "ruff==0.6.9",
+]
+
+[tool.setuptools]
+packages = ["etl", "dq", "cp", "corr"]
+py-modules = ["dashboard_queries"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests that need data/processed/nhs.duckdb or data/raw/ call pytest.skip(); the
+# rest are hermetic and run anywhere. -ra surfaces the skip reasons so a green CI
+# run still shows how much of the suite was actually exercised.
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# E402 (import not at top of file) is expected: every package entrypoint inserts the
+# repo root on sys.path before importing sibling packages, so the project can be run
+# as scripts (`python etl/run_all.py`) as well as imported.
+ignore = ["E402"]
