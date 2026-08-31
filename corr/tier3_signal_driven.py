@@ -22,8 +22,8 @@ Neither question touches etl/, dq/, cp/, or corr's Tier 1/2 modules — both
 only import their detection/correlation logic and read the already-built
 fact/signal tables.
 
-Two open judgement calls, not specified by the brief and not confirmed by
-the user when asked, so documented here for visibility:
+Two settings below are judgement calls rather than values derived from the
+data, so they are stated here to be reviewed and challenged, not left implicit:
 - Question A's "correlated" threshold is |r| >= CORRELATION_THRESHOLD (0.5).
 - Question B's "drift" detector is cp/changepoints.py's PELT/l2+BIC method,
   not a dq/-style single-month jump check.
