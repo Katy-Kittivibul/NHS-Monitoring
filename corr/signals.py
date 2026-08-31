@@ -20,7 +20,7 @@ __all__ = [
 
 
 def ensure_corr_schema_exists(conn):
-    """Create the corr_signals table if it doesn't already exist."""
+    """Create the corr_signals table and its per-tier views if they don't already exist."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS corr_signals (
             tier VARCHAR,
@@ -32,6 +32,17 @@ def ensure_corr_schema_exists(conn):
             detail VARCHAR,
             PRIMARY KEY (tier, dataset_pair, geography_code, month_date)
         )
+    """)
+    # The dashboard reads tier 1 and tier 2 through these views rather than
+    # filtering corr_signals inline. Tier literals are defined in
+    # corr/tier1_region.py and corr/tier2_trust.py; keep them in step.
+    conn.execute("""
+        CREATE OR REPLACE VIEW corr_signals_tier1 AS
+        SELECT * FROM corr_signals WHERE tier = 'tier1_region'
+    """)
+    conn.execute("""
+        CREATE OR REPLACE VIEW corr_signals_tier2 AS
+        SELECT * FROM corr_signals WHERE tier = 'tier2_trust'
     """)
 
 

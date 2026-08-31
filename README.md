@@ -39,12 +39,6 @@ Checks whether A&E, RTT, prescribing, and dental data move together, at three le
 
 A Streamlit app for browsing all of the above, with a trust picker in the sidebar.
 
-**One known gap:** two of the dashboard's database views aren't created by any script in this repo yet. If you're setting this up from scratch, run these two commands before opening the dashboard's first page:
-
-```sql
-CREATE VIEW corr_signals_tier1 AS SELECT * FROM corr_signals WHERE tier = 'tier1_region';
-CREATE VIEW corr_signals_tier2 AS SELECT * FROM corr_signals WHERE tier = 'tier2_trust';
-```
 
 ## Datasets
 
@@ -104,7 +98,7 @@ Run the tests:
 python -m pytest tests/ -q
 ```
 
-Launch the dashboard (see the known gap note above first):
+Launch the dashboard:
 
 ```bash
 streamlit run dashboard.py
