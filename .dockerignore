@@ -1,0 +1,17 @@
+.git/
+.github/
+data/
+*.duckdb
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+env/
+.claude/
+.gemini/
+CLAUDE.md
+reports/
+docs/*.html
+*.png
+stream.log
