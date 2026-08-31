@@ -40,7 +40,9 @@ def run_prescribing_dq(db_path: str = "data/processed/nhs.duckdb") -> list[dict]
         # itself (etl/prescribing.py upserts every practice_code it sees), so no
         # practice can ever be "in dim_organisation but never in fact_prescribing".
         # Kept for consistency — becomes meaningful automatically if that ever changes.
-        flags += check_org_never_reported(conn, DATASET, TABLE, org_col="practice_code", dim_org_type="practice")
+        flags += check_org_never_reported(
+            conn, DATASET, TABLE, org_col="practice_code", dim_org_type="practice"
+        )
 
         write_flags(conn, flags)
         print(f"[OK] DQ checks complete for {DATASET}: {len(flags)} flags written")

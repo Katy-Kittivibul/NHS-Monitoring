@@ -117,7 +117,9 @@ class TestGetTrustRegionMap:
                 parent_org_code VARCHAR, region_name VARCHAR
             )
         """)
-        conn.execute("INSERT INTO dim_organisation VALUES ('RXX', 'Mystery Trust', 'trust', NULL, 'NOWHERESVILLE')")
+        conn.execute(
+            "INSERT INTO dim_organisation VALUES ('RXX', 'Mystery Trust', 'trust', NULL, 'NOWHERESVILLE')"
+        )
         result = get_trust_region_map(conn)
         assert result.empty
         conn.close()
@@ -170,7 +172,8 @@ class TestWriteCorrSignalsIdempotent:
             "correlation_metric": 0.5, "detail": "v1",
         }]
         write_corr_signals(synthetic_conn, "tier2_trust", "ae_rtt_trust", signals)
-        write_corr_signals(synthetic_conn, "tier2_trust", "ae_rtt_trust", [])  # trust no longer has a full window
+        # trust no longer has a full window
+        write_corr_signals(synthetic_conn, "tier2_trust", "ae_rtt_trust", [])
 
         count = synthetic_conn.execute("SELECT COUNT(*) FROM corr_signals").fetchall()[0][0]
         assert count == 0
@@ -216,7 +219,9 @@ class TestRealDataIntegration:
     def test_tier2_produces_signals_from_shared_trust_codes(self):
         conn = get_connection(REAL_DB_PATH)
         try:
-            ae_trusts = set(conn.execute("SELECT DISTINCT org_code FROM fact_ae_attendances").df()["org_code"])
+            ae_trusts = set(
+                conn.execute("SELECT DISTINCT org_code FROM fact_ae_attendances").df()["org_code"]
+            )
             rtt_trusts = set(conn.execute("SELECT DISTINCT org_code FROM fact_rtt_waits").df()["org_code"])
         finally:
             conn.close()

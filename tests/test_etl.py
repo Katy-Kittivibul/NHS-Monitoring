@@ -300,7 +300,9 @@ class TestSubIcbMapping:
             """).df()
         finally:
             conn.close()
-        assert len(orphans) == 0, f"Orphan sub_icb_codes with no ICB rollup: {orphans['sub_icb_code'].tolist()}"
+        assert len(orphans) == 0, (
+            f"Orphan sub_icb_codes with no ICB rollup: {orphans['sub_icb_code'].tolist()}"
+        )
 
     def test_dim_sub_icb_icb_codes_all_in_dim_organisation(self):
         """Every ICB dim_sub_icb points to must itself be a dim_organisation row —
@@ -316,7 +318,9 @@ class TestSubIcbMapping:
             """).df()
         finally:
             conn.close()
-        assert len(missing) == 0, f"dim_sub_icb ICB codes missing from dim_organisation: {missing['icb_code'].tolist()}"
+        assert len(missing) == 0, (
+            f"dim_sub_icb ICB codes missing from dim_organisation: {missing['icb_code'].tolist()}"
+        )
 
 
 class TestSpecialistNoAeFlag:
@@ -363,7 +367,9 @@ class TestSpecialistNoAeFlag:
         etl_ae_attendances(self.REAL_DB_PATH)
         conn = get_connection(self.REAL_DB_PATH)
         try:
-            ae_trusts = set(conn.execute("SELECT DISTINCT org_code FROM fact_ae_attendances").df()["org_code"])
+            ae_trusts = set(
+                conn.execute("SELECT DISTINCT org_code FROM fact_ae_attendances").df()["org_code"]
+            )
             rtt_only = conn.execute("""
                 SELECT DISTINCT org_code FROM fact_rtt_waits
                 WHERE org_code NOT IN (SELECT DISTINCT org_code FROM fact_ae_attendances)
@@ -388,7 +394,8 @@ class TestSpecialistNoAeFlag:
         conn = get_connection(self.REAL_DB_PATH)
         try:
             first = conn.execute(
-                "SELECT org_code, specialist_no_ae FROM dim_organisation WHERE org_type = 'trust' ORDER BY org_code"
+                "SELECT org_code, specialist_no_ae FROM dim_organisation "
+                "WHERE org_type = 'trust' ORDER BY org_code"
             ).fetchall()
         finally:
             conn.close()
@@ -397,7 +404,8 @@ class TestSpecialistNoAeFlag:
         conn = get_connection(self.REAL_DB_PATH)
         try:
             second = conn.execute(
-                "SELECT org_code, specialist_no_ae FROM dim_organisation WHERE org_type = 'trust' ORDER BY org_code"
+                "SELECT org_code, specialist_no_ae FROM dim_organisation "
+                "WHERE org_type = 'trust' ORDER BY org_code"
             ).fetchall()
         finally:
             conn.close()

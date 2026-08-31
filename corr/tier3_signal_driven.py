@@ -113,7 +113,9 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
         ensure_tier3_schema_exists(conn)
         trust_to_icb = load_trust_to_icb()
 
-        signal_months = conn.execute("SELECT DISTINCT org_code AS trust_code, month_date FROM cp_signals").df()
+        signal_months = conn.execute(
+            "SELECT DISTINCT org_code AS trust_code, month_date FROM cp_signals"
+        ).df()
 
         trust_breach_delta = to_mom_delta(get_ae_breach_pct_by_trust(conn))
         icb_deltas = {
@@ -147,7 +149,10 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
                             signals.append({
                                 "trust_code": trust_code, "icb_code": icb_code, "month_date": signal_month,
                                 "finding": f"{metric}_insufficient_window",
-                                "detail": f"no full {WINDOW_MONTHS}-month paired MoM-delta window ending {signal_month.date()}",
+                                "detail": (
+                                    f"no full {WINDOW_MONTHS}-month paired MoM-delta window "
+                                    f"ending {signal_month.date()}"
+                                ),
                             })
                             continue
 
@@ -162,7 +167,10 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
             write_tier3_signals(conn, "corr_signals_tier3a", trust_code, signals)
             all_signals.extend(signals)
 
-        print(f"[OK] Tier 3 Question A: {len(all_signals)} signals across {signal_months['trust_code'].nunique()} trusts")
+        print(
+            f"[OK] Tier 3 Question A: {len(all_signals)} signals "
+            f"across {signal_months['trust_code'].nunique()} trusts"
+        )
         return all_signals
     finally:
         conn.close()
@@ -219,7 +227,10 @@ def run_question_b(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
                         signals.append({
                             "trust_code": trust_code, "icb_code": icb_code, "month_date": anchor,
                             "finding": f"{metric}_insufficient_data",
-                            "detail": f"ICB {icb_code} has {len(icb_values_df)} months, need >= {CP_MIN_POINTS}",
+                            "detail": (
+                                f"ICB {icb_code} has {len(icb_values_df)} months, "
+                                f"need >= {CP_MIN_POINTS}"
+                            ),
                         })
                         continue
 

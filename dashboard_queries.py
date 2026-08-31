@@ -39,14 +39,16 @@ def get_dq_flags(conn) -> pd.DataFrame:
 def get_dq_volume_trends(conn) -> pd.DataFrame:
     """Monthly record counts per dataset, for the ingestion-consistency chart."""
     return conn.execute("""
-        SELECT month_date, 'A&E' AS dataset, COUNT(*) AS record_count FROM fact_ae_attendances GROUP BY month_date
+        SELECT month_date, 'A&E' AS dataset, COUNT(*) AS record_count
+            FROM fact_ae_attendances GROUP BY month_date
         UNION ALL
         SELECT month_date, 'RTT' AS dataset, COUNT(*) AS record_count FROM fact_rtt_waits GROUP BY month_date
         UNION ALL
         SELECT month_date, 'Prescribing' AS dataset, COUNT(DISTINCT practice_code) AS record_count
             FROM fact_prescribing GROUP BY month_date
         UNION ALL
-        SELECT month_date, 'Dental' AS dataset, COUNT(*) AS record_count FROM fact_dental_uda GROUP BY month_date
+        SELECT month_date, 'Dental' AS dataset, COUNT(*) AS record_count
+            FROM fact_dental_uda GROUP BY month_date
         ORDER BY month_date, dataset
     """).df()
 

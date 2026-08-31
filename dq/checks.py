@@ -234,7 +234,10 @@ def check_org_never_reported(conn, dataset, table, org_col, dim_org_type, month_
         status = "FAIL"
         codes = missing["org_code"].tolist()
         shown = ", ".join(codes[:10]) + ("..." if len(codes) > 10 else "")
-        detail = f"{len(codes)} org(s) in dim_organisation (org_type='{dim_org_type}') never appear in {table}: {shown}"
+        detail = (
+            f"{len(codes)} org(s) in dim_organisation (org_type='{dim_org_type}') "
+            f"never appear in {table}: {shown}"
+        )
 
     return [{"dataset": dataset, "month_date": latest_month, "check_name": "org_never_reported",
              "status": status, "detail": detail}]

@@ -125,7 +125,9 @@ if df_trusts.empty:
     selected_trust = None
     selected_trust_name = None
 else:
-    trust_options = {f"{row['org_code']} - {row['org_name']}": row['org_code'] for _, row in df_trusts.iterrows()}
+    trust_options = {
+        f"{row['org_code']} - {row['org_name']}": row['org_code'] for _, row in df_trusts.iterrows()
+    }
     default_index = list(trust_options.values()).index("RXC") if "RXC" in trust_options.values() else 0
 
     selected_trust_label = st.sidebar.selectbox(
@@ -134,7 +136,9 @@ else:
         index=default_index
     )
     selected_trust = trust_options[selected_trust_label]
-    selected_trust_name = selected_trust_label.split(" - ", 1)[1] if " - " in selected_trust_label else selected_trust
+    selected_trust_name = (
+        selected_trust_label.split(" - ", 1)[1] if " - " in selected_trust_label else selected_trust
+    )
 
     st.sidebar.info(f"Active Trust: **{selected_trust}**\n\n{selected_trust_name}")
 
@@ -146,9 +150,12 @@ with st.sidebar.expander("📖 Glossary & Acronyms", expanded=False):
     *   **BNF**: British National Formulary (GP prescribing classification).
     *   **UDA**: Units of Dental Activity (NHS dental contract delivery metric).
     *   **ODS Code**: Organisation Data Service unique ID (e.g. `RXC`, `R0A`).
-    *   **🚩 PELT Shift**: Pruned Exact Linear Time algorithm — flags structural step-changes in mean performance level.
-    *   **⚠️ 3-Sigma Outlier**: Statistical Process Control (XmR Rule 1) — single-month point beyond 3 standard deviations from mean.
-    *   **🔄 Run of 7**: Statistical Process Control (XmR Rule 2) — 7 consecutive months falling on the same side of the mean.
+    *   **🚩 PELT Shift**: Pruned Exact Linear Time algorithm — flags structural step-changes in mean
+        performance level.
+    *   **⚠️ 3-Sigma Outlier**: Statistical Process Control (XmR Rule 1) — single-month point beyond 3
+        standard deviations from mean.
+    *   **🔄 Run of 7**: Statistical Process Control (XmR Rule 2) — 7 consecutive months falling on the same
+        side of the mean.
     """)
 
 
@@ -157,14 +164,17 @@ with st.sidebar.expander("📖 Glossary & Acronyms", expanded=False):
 # ==============================================================================
 def page_stage1():
     st.title("🛡️ Stage 1: Data Quality & Schema Integrity")
-    st.markdown("Monitors data sanity, row counts, and structural anomalies across all 4 ingested NHS datasets.")
+    st.markdown(
+        "Monitors data sanity, row counts, and structural anomalies across all 4 ingested NHS datasets."
+    )
 
     with st.expander("ℹ️ How Stage 1 Works & Terminology"):
         st.markdown("""
         Stage 1 enforces automated data quality checks during ETL ingestion:
         *   **Row Count Jumps**: Flags sudden drops or spikes in ingested row counts month-over-month.
         *   **Null Checks**: Ensures mandatory keys (`org_code`, `month_date`) contain no missing values.
-        *   **Valid Range Bounds**: Verifies percentages (e.g. A&E breach %, RTT 18wk+ %) stay within [0, 100]%.
+        *   **Valid Range Bounds**: Verifies percentages (e.g. A&E breach %, RTT 18wk+ %) stay within [0,
+            100]%.
         """)
 
     df_dq = safe_load(load_dq_flags, context="data quality flags")
@@ -189,9 +199,13 @@ def page_stage1():
     # Filter controls
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        dataset_filter = st.multiselect("Filter Datasets:", options=df_dq['dataset'].unique(), default=df_dq['dataset'].unique())
+        dataset_filter = st.multiselect(
+            "Filter Datasets:", options=df_dq['dataset'].unique(), default=df_dq['dataset'].unique()
+        )
     with col_f2:
-        status_filter = st.multiselect("Filter Status:", options=df_dq['status'].unique(), default=df_dq['status'].unique())
+        status_filter = st.multiselect(
+            "Filter Status:", options=df_dq['status'].unique(), default=df_dq['status'].unique()
+        )
 
     filtered_dq = df_dq[(df_dq['dataset'].isin(dataset_filter)) & (df_dq['status'].isin(status_filter))]
 
@@ -231,14 +245,20 @@ def page_stage2():
         st.warning("No trust selected — see the sidebar.")
         return
 
-    st.markdown(f"Analyzes structural regime shifts (PELT algorithm) and process anomalies (XmR rules) for **{selected_trust_name} ({selected_trust})**.")
+    st.markdown(
+        f"Analyzes structural regime shifts (PELT algorithm) and process anomalies (XmR rules) "
+        f"for **{selected_trust_name} ({selected_trust})**."
+    )
 
     with st.expander("ℹ️ How Stage 2 Works & Signal Types"):
         st.markdown("""
         Stage 2 scans monthly performance metrics to detect operational signals without manual thresholds:
-        *   **🚩 PELT Shift (Pruned Exact Linear Time)**: Identifies permanent structural step-changes in performance level (e.g. A&E breach rate shifting permanently from 25% to 38%).
-        *   **⚠️ 3-Sigma Outlier (SPC Rule 1)**: Flags single months falling outside 3 moving-range standard deviations from baseline mean (isolated spike/drop).
-        *   **🔄 Run of 7 (SPC Rule 2)**: Flags 7 consecutive months on the same side of the mean, signaling a process shift.
+        *   **🚩 PELT Shift (Pruned Exact Linear Time)**: Identifies permanent structural step-changes in
+            performance level (e.g. A&E breach rate shifting permanently from 25% to 38%).
+        *   **⚠️ 3-Sigma Outlier (SPC Rule 1)**: Flags single months falling outside 3 moving-range standard
+            deviations from baseline mean (isolated spike/drop).
+        *   **🔄 Run of 7 (SPC Rule 2)**: Flags 7 consecutive months on the same side of the mean, signaling a
+            process shift.
         """)
 
     # Load signals for selected trust
@@ -357,19 +377,30 @@ def page_stage2():
 # ==============================================================================
 def page_stage3():
     st.title("🔗 Stage 3: Cross-Metric & Cross-Domain Correlations")
-    st.markdown("Investigates cross-dataset interactions across 3 hierarchy tiers: Macro Regional, Trust Level, and Signal-Driven Primary Care Rollups.")
+    st.markdown(
+        "Investigates cross-dataset interactions across 3 hierarchy tiers: Macro Regional, "
+        "Trust Level, and Signal-Driven Primary Care Rollups."
+    )
 
     with st.expander("ℹ️ How Stage 3 Works & Key Findings Guide", expanded=True):
         st.markdown("""
-        Stage 3 evaluates whether performance shifts in emergency care (A&E) correlate with elective care (RTT) or primary care supply changes (Prescribing & Dental):
-        *   **Tier 1 (Macro Regional)**: Evaluates 6-month rolling correlations ($r$) between Regional A&E breach rates and GP Prescribing volumes across NHS Regions.
-        *   **Tier 2 (Trust Level)**: Directly pairs A&E Breach % against RTT 18wk+ Breach % for each acute trust. Strong positive correlation ($r > 0.6$) indicates hospital-wide capacity bottlenecks.
-        *   **Tier 3 (Signal-Driven Primary Care)**: Checks if A&E changepoints coincide with primary care prescribing or dental activity shifts within the trust's parent ICB.
+        Stage 3 evaluates whether performance shifts in emergency care (A&E) correlate with elective care
+        (RTT) or primary care supply changes (Prescribing & Dental):
+        *   **Tier 1 (Macro Regional)**: Evaluates 6-month rolling correlations ($r$) between Regional A&E
+            breach rates and GP Prescribing volumes across NHS Regions.
+        *   **Tier 2 (Trust Level)**: Directly pairs A&E Breach % against RTT 18wk+ Breach % for each acute
+            trust. Strong positive correlation ($r > 0.6$) indicates hospital-wide capacity bottlenecks.
+        *   **Tier 3 (Signal-Driven Primary Care)**: Checks if A&E changepoints coincide with primary care
+            prescribing or dental activity shifts within the trust's parent ICB.
         """)
 
     tier_tab = st.radio(
         "Select Correlation Tier:",
-        ["Tier 1: Regional (Macro)", "Tier 2: Trust (A&E vs RTT)", "Tier 3: Signal-Driven (Primary vs Secondary Care)"],
+        [
+            "Tier 1: Regional (Macro)",
+            "Tier 2: Trust (A&E vs RTT)",
+            "Tier 3: Signal-Driven (Primary vs Secondary Care)",
+        ],
         horizontal=True
     )
 
@@ -381,7 +412,10 @@ def page_stage3():
         df_t1 = safe_load(load_tier1_correlations, context="Tier 1 regional correlations")
 
         if df_t1.empty:
-            st.info("No Tier 1 regional correlation signals found — run `python corr/run_all.py` to populate them.")
+            st.info(
+                "No Tier 1 regional correlation signals found — run `python corr/run_all.py` "
+                "to populate them."
+            )
             return
 
         # Map human-readable region names
@@ -399,8 +433,12 @@ def page_stage3():
         # Key Findings Callout Box
         st.success("""
         💡 **Key Findings & Explanation (Tier 1 Macro Analysis)**:
-        *   **Interpretation**: Measures rolling 6-month Pearson correlation ($r$) over time between Regional Pairs (`ae_prescribing_region`, `ae_dental_region`, `rtt_prescribing_region`, `rtt_dental_region`).
-        *   **Macro Insight**: Most regions show low-to-moderate monthly correlation, indicating that primary care prescribing and dental activity volumes move independently of regional emergency department breach rates at the macro geographic scale.
+        *   **Interpretation**: Measures rolling 6-month Pearson correlation ($r$) over time between Regional
+            Pairs (`ae_prescribing_region`, `ae_dental_region`, `rtt_prescribing_region`,
+            `rtt_dental_region`).
+        *   **Macro Insight**: Most regions show low-to-moderate monthly correlation, indicating that primary
+            care prescribing and dental activity volumes move independently of regional emergency department
+            breach rates at the macro geographic scale.
         """)
 
         # Controls for filtering chart
@@ -469,7 +507,9 @@ def page_stage3():
                 "dataset_pair": "Dataset Pair"
             }
         )
-        fig_box.update_layout(xaxis_title="NHS Region Code", yaxis_title="Pearson Correlation (r)", height=420)
+        fig_box.update_layout(
+            xaxis_title="NHS Region Code", yaxis_title="Pearson Correlation (r)", height=420
+        )
         st.plotly_chart(fig_box, use_container_width=True)
 
     elif "Tier 2" in tier_tab:
@@ -487,18 +527,34 @@ def page_stage3():
         # Key Findings Callout Box
         if not np.isnan(avg_r):
             if avg_r > 0.6:
-                insight = f"**Strong Positive Correlation (mean r = {avg_r:.2f})**: Emergency A&E breaches and Elective RTT waiting list breaches move together tightly. This indicates a **systemic hospital-wide bed/staffing bottleneck** affecting both emergency admissions and elective surgeries simultaneously."
+                insight = (
+                    f"**Strong Positive Correlation (mean r = {avg_r:.2f})**: Emergency A&E breaches "
+                    f"and Elective RTT waiting list breaches move together tightly. This indicates a "
+                    f"**systemic hospital-wide bed/staffing bottleneck** affecting both emergency "
+                    f"admissions and elective surgeries simultaneously."
+                )
                 box_type = st.warning
             elif avg_r < -0.3:
-                insight = f"**Negative Correlation (mean r = {avg_r:.2f})**: Emergency A&E spikes occur independently or inverse to elective RTT waits, suggesting operational decoupling or resource reallocation between emergency and elective wards."
+                insight = (
+                    f"**Negative Correlation (mean r = {avg_r:.2f})**: Emergency A&E spikes occur "
+                    f"independently or inverse to elective RTT waits, suggesting operational "
+                    f"decoupling or resource reallocation between emergency and elective wards."
+                )
                 box_type = st.info
             else:
-                insight = f"**Moderate/Weak Correlation (mean r = {avg_r:.2f})**: Emergency department performance fluctuates with minimal direct coupling to elective waiting list build-ups for this trust."
+                insight = (
+                    f"**Moderate/Weak Correlation (mean r = {avg_r:.2f})**: Emergency department "
+                    f"performance fluctuates with minimal direct coupling to elective waiting list "
+                    f"build-ups for this trust."
+                )
                 box_type = st.info
 
             box_type(f"💡 **Key Finding & Interpretation ({selected_trust})**:\n\n{insight}")
         else:
-            st.info(f"No Tier 2 correlation signals found for {selected_trust} — usually means fewer than 6 months of paired A&E/RTT data.")
+            st.info(
+                f"No Tier 2 correlation signals found for {selected_trust} — usually means "
+                f"fewer than 6 months of paired A&E/RTT data."
+            )
 
         if not df_t2.empty:
             st.dataframe(df_t2, use_container_width=True)
@@ -511,10 +567,25 @@ def page_stage3():
             df_merged = pd.merge(df_ae, df_rtt, on="month_date", suffixes=('_ae', '_rtt'))
 
             fig_t2 = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_t2.add_trace(go.Scatter(x=df_merged['month_date'], y=df_merged['breach_pct'], name="A&E Breach %", line=dict(color='#2980b9', width=3)), secondary_y=False)
-            fig_t2.add_trace(go.Scatter(x=df_merged['month_date'], y=df_merged['over_18wk_pct'], name="RTT 18wk+ Breach %", line=dict(color='#e67e22', width=3)), secondary_y=True)
+            fig_t2.add_trace(
+                go.Scatter(
+                    x=df_merged['month_date'], y=df_merged['breach_pct'],
+                    name="A&E Breach %", line=dict(color='#2980b9', width=3),
+                ),
+                secondary_y=False,
+            )
+            fig_t2.add_trace(
+                go.Scatter(
+                    x=df_merged['month_date'], y=df_merged['over_18wk_pct'],
+                    name="RTT 18wk+ Breach %", line=dict(color='#e67e22', width=3),
+                ),
+                secondary_y=True,
+            )
 
-            fig_t2.update_layout(title=f"A&E vs. RTT Paired Time Series — {selected_trust_name}", height=450, hovermode="x unified")
+            fig_t2.update_layout(
+                title=f"A&E vs. RTT Paired Time Series — {selected_trust_name}",
+                height=450, hovermode="x unified",
+            )
             fig_t2.update_yaxes(title_text="<b>A&E Breach %</b>", secondary_y=False)
             fig_t2.update_yaxes(title_text="<b>RTT 18wk+ %</b>", secondary_y=True)
 
@@ -531,8 +602,12 @@ def page_stage3():
 
         st.info("""
         💡 **Key Finding & Method Explanation (Tier 3)**:
-        *   **Goal**: Tests whether secondary care A&E changepoints coincide with statistically significant shifts in primary care prescribing (Tier 3a) or dental activity (Tier 3b) within the trust's parent ICB.
-        *   **Finding**: If `finding = 'no_correlated_shift'`, the secondary care changepoint occurred without a matching primary care shift in the surrounding window, confirming the A&E performance shift was driven by **internal hospital operational factors** rather than primary care supply changes.
+        *   **Goal**: Tests whether secondary care A&E changepoints coincide with statistically significant
+            shifts in primary care prescribing (Tier 3a) or dental activity (Tier 3b) within the trust's
+            parent ICB.
+        *   **Finding**: If `finding = 'no_correlated_shift'`, the secondary care changepoint occurred without
+            a matching primary care shift in the surrounding window, confirming the A&E performance shift was
+            driven by **internal hospital operational factors** rather than primary care supply changes.
         """)
 
         col_3a, col_3b = st.columns(2)
@@ -560,7 +635,11 @@ def page_stage3():
         if len(df_all_t3a) > 0:
             st.dataframe(df_all_t3a, use_container_width=True)
         else:
-            st.warning("No co-occurring primary care prescribing or dental shifts were detected for secondary care changepoints (all candidate p-values > 0.05). A&E shifts are predominantly driven by internal trust/hospital capacity dynamics.")
+            st.warning(
+                "No co-occurring primary care prescribing or dental shifts were detected for "
+                "secondary care changepoints (all candidate p-values > 0.05). A&E shifts are "
+                "predominantly driven by internal trust/hospital capacity dynamics."
+            )
 
 
 # ==============================================================================

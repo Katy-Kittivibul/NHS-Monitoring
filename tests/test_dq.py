@@ -242,7 +242,9 @@ class TestOrgMissingVsPriorMonth:
         by_month_rc = {f["month_date"]: f for f in row_count_flags}
         assert by_month_rc[months[1]]["status"] == "OK"  # invisible to the aggregate check
 
-        org_flags = check_org_missing_vs_prior_month(synthetic_conn, "test_ds", "fact_test", org_col="org_code")
+        org_flags = check_org_missing_vs_prior_month(
+            synthetic_conn, "test_ds", "fact_test", org_col="org_code"
+        )
         by_month_org = {f["month_date"]: f for f in org_flags}
         assert by_month_org[months[1]]["status"] == "FAIL"  # caught by the per-org check
         assert "T099" in by_month_org[months[1]]["detail"]
@@ -329,7 +331,9 @@ class TestWriteFlagsIdempotent:
         write_flags(synthetic_conn, flags)
         write_flags(synthetic_conn, flags)
 
-        count = synthetic_conn.execute("SELECT COUNT(*) FROM dq_flags WHERE dataset = 'test_ds'").fetchall()[0][0]
+        count = synthetic_conn.execute(
+            "SELECT COUNT(*) FROM dq_flags WHERE dataset = 'test_ds'"
+        ).fetchall()[0][0]
         assert count == 1
 
     def test_rerun_replaces_stale_flags_for_dataset(self, synthetic_conn):
