@@ -1,8 +1,14 @@
-import pandas as pd
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+import pandas as pd
 import json
 from datetime import datetime
-from common import get_connection, ensure_schema_exists, create_dim_sub_icb
+from etl.common import get_connection, ensure_schema_exists, create_dim_sub_icb  # noqa: E402 — after the sys.path shim above
 
 
 def load_prescribing_data(json_path: str = "data/raw/openprescribing_spending_202310.json"):

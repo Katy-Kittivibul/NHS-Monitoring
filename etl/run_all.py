@@ -2,14 +2,15 @@
 import sys
 from pathlib import Path
 
-# Add etl directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-from common import get_connection, create_dim_date, ensure_schema_exists
-from ae_attendances import etl_ae_attendances
-from rtt_waits import etl_rtt_waits
-from prescribing import etl_prescribing
-from dental_uda import etl_dental_uda
+from etl.common import get_connection, create_dim_date, ensure_schema_exists  # noqa: E402
+from etl.ae_attendances import etl_ae_attendances  # noqa: E402
+from etl.rtt_waits import etl_rtt_waits  # noqa: E402
+from etl.prescribing import etl_prescribing  # noqa: E402
+from etl.dental_uda import etl_dental_uda  # noqa: E402
 
 
 def run_all_etl(db_path: str = "data/processed/nhs.duckdb"):

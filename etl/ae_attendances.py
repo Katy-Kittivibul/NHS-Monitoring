@@ -1,8 +1,14 @@
-import pandas as pd
+import sys
 from pathlib import Path
+
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+import pandas as pd
 import re
 from datetime import datetime
-from common import get_connection, ensure_schema_exists
+from etl.common import get_connection, ensure_schema_exists  # noqa: E402 — after the sys.path shim above
 
 
 def parse_ae_period(period_str: str) -> datetime:

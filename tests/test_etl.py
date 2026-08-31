@@ -326,25 +326,6 @@ class TestSpecialistNoAeFlag:
     the two together.
     """
 
-    def test_schema_has_specialist_no_ae_column(self):
-        conn = get_connection("data/processed/test_nhs.duckdb")
-        try:
-            ensure_schema_exists(conn)
-            columns = {row[0] for row in conn.execute("DESCRIBE dim_organisation").fetchall()}
-            assert "specialist_no_ae" in columns
-        finally:
-            conn.close()
-
-    def test_ensure_schema_exists_migration_is_idempotent(self):
-        """ALTER TABLE ADD COLUMN IF NOT EXISTS must not error on a table that
-        already has the column (i.e. every second-and-later run)."""
-        conn = get_connection("data/processed/test_nhs.duckdb")
-        try:
-            ensure_schema_exists(conn)
-            ensure_schema_exists(conn)  # would raise if the migration weren't idempotent
-        finally:
-            conn.close()
-
     REAL_DB_PATH = "data/processed/nhs.duckdb"
 
     @pytest.fixture(autouse=True)
@@ -425,30 +406,70 @@ class TestSpecialistNoAeFlag:
 
 
 class TestDatabase:
+    """Hermetic checks on the connection factory and schema DDL — deliberately no
+    dependency on data/processed/, so these still run in CI where the database and
+    raw extracts are gitignored.
+    """
+
     def test_duckdb_connection(self):
-        """Test DuckDB connection works."""
-        conn = None
+        """get_connection returns a usable DuckDB connection."""
+        conn = get_connection(":memory:")
         try:
-            conn = get_connection("data/processed/nhs.duckdb")
             result = conn.execute("SELECT 1 as test").fetchall()
             assert result[0][0] == 1
         finally:
-            if conn:
-                conn.close()
+            conn.close()
 
-    def test_schema_creation(self):
-        """Test schema creation works."""
-        conn = get_connection("data/processed/test_nhs.duckdb")
+    def test_schema_creation(self, tmp_path):
+        """ensure_schema_exists creates every table the pipeline writes to.
+
+        Written to tmp_path rather than data/processed/: this test used to leave a
+        real test_nhs.duckdb behind next to the production database.
+        """
+        conn = get_connection(str(tmp_path / "schema_check.duckdb"))
         try:
             ensure_schema_exists(conn)
 
             tables = [
-                "dim_date", "dim_organisation", "fact_ae_attendances",
+                "dim_date", "dim_organisation", "dim_sub_icb", "fact_ae_attendances",
                 "fact_rtt_waits", "fact_prescribing", "fact_dental_uda"
             ]
 
+            created = {
+                row[0] for row in conn.execute("SHOW TABLES").fetchall()
+            }
+            missing = [t for t in tables if t not in created]
+            assert not missing, f"ensure_schema_exists did not create: {missing}"
+
+            # Each table must be queryable, not merely present in the catalogue.
             for table in tables:
-                result = conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchall()
+                conn.execute(f"SELECT * FROM {table} LIMIT 1").fetchall()
+        finally:
+            conn.close()
+
+    def test_schema_has_specialist_no_ae_column(self, tmp_path):
+        """dim_organisation must carry specialist_no_ae straight from the DDL.
+
+        Lives here rather than on TestSpecialistNoAeFlag: it exercises schema DDL
+        only, so it should not inherit that class's skip-without-database fixture.
+        """
+        conn = get_connection(str(tmp_path / "schema_check.duckdb"))
+        try:
+            ensure_schema_exists(conn)
+            columns = {row[0] for row in conn.execute("DESCRIBE dim_organisation").fetchall()}
+            assert "specialist_no_ae" in columns
+        finally:
+            conn.close()
+
+    def test_ensure_schema_exists_migration_is_idempotent(self, tmp_path):
+        """ALTER TABLE ADD COLUMN IF NOT EXISTS must not error on a table that
+        already has the column (i.e. every second-and-later run)."""
+        conn = get_connection(str(tmp_path / "schema_check.duckdb"))
+        try:
+            ensure_schema_exists(conn)
+            ensure_schema_exists(conn)  # would raise if the migration weren't idempotent
+            columns = {row[0] for row in conn.execute("DESCRIBE dim_organisation").fetchall()}
+            assert "specialist_no_ae" in columns
         finally:
             conn.close()
 

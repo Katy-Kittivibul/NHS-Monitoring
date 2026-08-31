@@ -25,6 +25,12 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 
+# Resolved relative to this module, not the CWD: this is a repo-tracked reference
+# file, so it must load identically whether the pipeline is run from the repo
+# root, from Docker (WORKDIR /app), or from pytest's rootdir. Same pattern as
+# corr/reference/trust_to_icb.py's DEFAULT_OUT_PATH.
+DEFAULT_ICB_REGION_PATH = str(Path(__file__).parent / "reference" / "icb_to_region.csv")
+
 REGION_FULL_NAME_TO_CODE = {
     "NHS ENGLAND LONDON": "Y56",
     "NHS ENGLAND SOUTH WEST": "Y58",
@@ -57,6 +63,6 @@ def get_trust_region_map(conn) -> pd.DataFrame:
     return resolved.reset_index(drop=True)
 
 
-def get_icb_region_map(mapping_path: str = "corr/reference/icb_to_region.csv") -> pd.DataFrame:
+def get_icb_region_map(mapping_path: str = DEFAULT_ICB_REGION_PATH) -> pd.DataFrame:
     """icb_code -> region_code / region_name, from the static ONS-sourced reference file."""
     return pd.read_csv(mapping_path)[["icb_code", "region_code", "region_name"]]
