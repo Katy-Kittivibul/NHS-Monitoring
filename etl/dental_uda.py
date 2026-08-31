@@ -6,7 +6,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import pandas as pd
-import re
 from datetime import datetime
 from etl.common import get_connection, ensure_schema_exists  # noqa: E402 — after the sys.path shim above
 
