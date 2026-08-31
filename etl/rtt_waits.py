@@ -141,11 +141,14 @@ def etl_rtt_waits(db_path: str = "data/processed/nhs.duckdb"):
                 continue
 
             # Upsert into fact table (clear old data first for idempotency)
-            month_date = df["month_date"].iloc[0]
-            conn.execute(
-                "DELETE FROM fact_rtt_waits WHERE month_date = ?",
-                [month_date]
-            )
+            # Every month present, not just the first: a file covering more than one
+            # month would otherwise leave the later months in place and duplicate them
+            # on re-run. Same loop as etl/dental_uda.py.
+            for month_date in df["month_date"].unique():
+                conn.execute(
+                    "DELETE FROM fact_rtt_waits WHERE month_date = ?",
+                    [month_date]
+                )
 
             conn.execute("""
                 INSERT INTO fact_rtt_waits

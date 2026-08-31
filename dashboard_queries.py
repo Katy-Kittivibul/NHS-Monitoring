@@ -44,7 +44,7 @@ def get_dq_volume_trends(conn) -> pd.DataFrame:
         UNION ALL
         SELECT month_date, 'RTT' AS dataset, COUNT(*) AS record_count FROM fact_rtt_waits GROUP BY month_date
         UNION ALL
-        SELECT month_date, 'Prescribing' AS dataset, COUNT(DISTINCT practice_code) AS record_count
+        SELECT month_date, 'Prescribing' AS dataset, COUNT(*) AS record_count
             FROM fact_prescribing GROUP BY month_date
         UNION ALL
         SELECT month_date, 'Dental' AS dataset, COUNT(*) AS record_count

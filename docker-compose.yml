@@ -10,7 +10,7 @@ services:
     # Tier 3 is not run here. corr/reference/trust_to_icb.py calls the NHS ODS API
     # once per trust, so it needs outbound network and several minutes; run it
     # deliberately rather than on every `compose up`:
-    #   docker compose run --rm pipeline sh -c     #     "python corr/reference/trust_to_icb.py && python corr/tier3_signal_driven.py"
+    #   docker compose run --rm pipeline sh -c \n    #     "python corr/reference/trust_to_icb.py && python corr/tier3_signal_driven.py"
     command: >
       sh -c "python etl/run_all.py &&
              python dq/run_all.py &&

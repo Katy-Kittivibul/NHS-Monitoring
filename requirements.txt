@@ -1,6 +1,12 @@
 pandas==2.2.1
 duckdb==1.1.0
-openpyxl==3.11.0
+# etl/rtt_waits.py reads the RTT workbooks with engine="calamine", so the engine
+# has to be installed; pandas does not pull it in.
+python-calamine==0.8.2
+# Imported directly by etl/common.py (relativedelta); arrives via pandas today,
+# but a direct import belongs in the direct dependencies.
+python-dateutil==2.9.0.post0
+openpyxl==3.1.5
 pytest==7.4.4
 numpy==1.26.4
 ruptures==1.1.10

@@ -637,7 +637,7 @@ def page_stage3():
         else:
             st.warning(
                 "No co-occurring primary care prescribing or dental shifts were detected for "
-                "secondary care changepoints (all candidate p-values > 0.05). A&E shifts are "
+                "secondary care changepoints (no candidate pair reached |r| >= 0.5). A&E shifts are "
                 "predominantly driven by internal trust/hospital capacity dynamics."
             )
 

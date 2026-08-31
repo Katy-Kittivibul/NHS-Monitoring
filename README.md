@@ -4,9 +4,33 @@ A pipeline that pulls together four public NHS datasets and automatically flags 
 
 Built with Python and DuckDB, with a Streamlit dashboard on top. No AI or language models are used for detection. Every signal comes from a statistical test, not a model guess.
 
-## Why
+## What A&E is
 
-NHS data is public, but it's spread across different sources in different formats (CSV, Excel, JSON), and each one organises hospitals and clinics differently. Answering a simple question, like "did GP prescribing change around the same time A&E got worse in this area", normally means combining several spreadsheets by hand. This project does that automatically and runs statistics on top, so you start from a short list of signals instead of four unrelated files.
+A&E stands for Accident & Emergency. It's the hospital department you turn up to without an appointment, or get taken to by ambulance. It can't turn people away and it can't plan its own workload, which is part of why it's worth measuring.
+
+The main measure is the four-hour standard: what share of patients get admitted, transferred or discharged within four hours of arriving. Anything over that counts as a breach. That's the `breach_pct` column in this pipeline, worked out per trust per month across all three department types (Type 1 major units, Type 2 single-specialty units, and Type 3 minor injury and urgent treatment centres).
+
+## Why I picked A&E
+
+I wanted something where a change in the numbers actually means something, and A&E sits downstream of most of the rest of the system. If people can't get a GP appointment, some of them end up in A&E. If the wards are full, admitted patients wait on trolleys in A&E. If social care can't take people home, beds stay occupied and it backs up into A&E. So when A&E performance moves, it's often not really about A&E. It's the first place some other problem turns into a number I can actually see.
+
+The waits matter clinically as well, not just as a target. Long waits in emergency departments are linked to worse outcomes, and it gets worse the longer people wait. A four-hour breach rate is a blunt measure, but it's standing in for something real.
+
+There's also enough movement in the data to make it worth analysing. Over the 13 months I've loaded (March 2024 to March 2025) there are 28.7 million attendances across 200 trusts, and 7.6 million of those waited longer than four hours. That's a national breach rate of 26.6%, and it swings with the season: 24.2% in August 2024, 29.5% in December. A single trust shifting by a few points disappears completely in that average, which is why I went trust by trust rather than looking at the headline.
+
+## Why I built this
+
+"A&E got worse at this trust" isn't an answer, it's the start of one. The next question is what else changed at the same time, and that turned out to be annoying to answer even though all the data is public.
+
+It's published, but it's scattered across different formats (CSV, Excel, JSON) and none of it lines up. A&E and RTT report by hospital trust, GP prescribing reports by practice, dental reports by contract. So asking something like "did prescribing shift around the time A&E got worse here" means joining several spreadsheets by hand and hoping the geography matches. I got tired of doing that manually.
+
+So this does the joining, then runs the statistics on top, and I get to start from a short list of signals instead of four unrelated files. Three things I wanted it to tell me:
+
+1. Did something actually change, or is it just noise? That's what the changepoint detection and the process control rules are for. I didn't want to be eyeballing charts and talking myself into seeing a pattern.
+2. When A&E moved, did anything else move at the same time in the same area: prescribing, dental activity, elective waiting lists?
+3. Can I trust the numbers underneath, or did a trust quietly stop reporting for a month? That last one isn't hypothetical, it actually happened (see Stage 1).
+
+One thing worth saying plainly: this is all correlation on observational data. It can tell me two things moved together, and I've tried to be conservative about even claiming that much. It can't tell me one caused the other.
 
 ## What it found
 

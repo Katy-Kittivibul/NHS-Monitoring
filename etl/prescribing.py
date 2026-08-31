@@ -6,7 +6,8 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import json
-from datetime import datetime
+import re
+from datetime import date
 
 import pandas as pd
 
@@ -15,6 +16,19 @@ from etl.common import (  # noqa: E402 — after the sys.path shim above
     ensure_schema_exists,
     get_connection,
 )
+
+FILENAME_MONTH_RE = re.compile(r"openprescribing_spending_(\d{4})(\d{2})\.json$")
+
+
+def month_from_filename(json_path: str) -> date:
+    """Month covered by a payload that carries no date field, read off the filename."""
+    match = FILENAME_MONTH_RE.search(Path(json_path).name)
+    if not match:
+        raise ValueError(
+            f"{Path(json_path).name} carries no 'date' field and no YYYYMM in its name, "
+            "so the month it covers cannot be established"
+        )
+    return date(int(match.group(1)), int(match.group(2)), 1)
 
 
 def load_prescribing_data(json_path: str = "data/raw/openprescribing_spending_202310.json"):
@@ -40,8 +54,10 @@ def load_prescribing_data(json_path: str = "data/raw/openprescribing_spending_20
     if "date" in df.columns:
         df["month_date"] = pd.to_datetime(df["date"]).dt.date
     else:
-        # Fallback: use today's date if not found
-        df["month_date"] = datetime.now().date()
+        # Fall back to the month named in the filename, not the current date: stamping
+        # the run date onto the rows would put the wrong month in the fact table and
+        # make every re-run land somewhere new instead of replacing the same month.
+        df["month_date"] = month_from_filename(json_path)
 
     # Rename columns to match schema
     df = df.rename(columns={
@@ -94,11 +110,14 @@ def etl_prescribing(db_path: str = "data/processed/nhs.duckdb"):
                 continue
 
             # Upsert into fact table (clear old data first for idempotency)
-            month_date = df["month_date"].iloc[0]
-            conn.execute(
-                "DELETE FROM fact_prescribing WHERE month_date = ?",
-                [month_date]
-            )
+            # Every month present, not just the first: a file covering more than one
+            # month would otherwise leave the later months in place and duplicate them
+            # on re-run. Same loop as etl/dental_uda.py.
+            for month_date in df["month_date"].unique():
+                conn.execute(
+                    "DELETE FROM fact_prescribing WHERE month_date = ?",
+                    [month_date]
+                )
 
             conn.execute("""
                 INSERT INTO fact_prescribing
