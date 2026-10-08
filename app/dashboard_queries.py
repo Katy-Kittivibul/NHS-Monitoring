@@ -1,14 +1,17 @@
-"""Query functions backing dashboard.py — deliberately Streamlit-free so they
+"""Query functions backing app/dashboard.py — deliberately Streamlit-free so they
 can be imported and tested directly (see tests/test_dashboard.py) without
 pulling in a Streamlit script-run context.
 
 Each function takes an open DuckDB connection and returns a plain
 pandas.DataFrame. Caching and connection lifecycle live in dashboard.py.
 """
+from pathlib import Path
+
 import duckdb
 import pandas as pd
 
-DB_PATH = "data/processed/nhs.duckdb"
+# Anchored to the repo root (app/ is one level down) so it resolves from any cwd.
+DB_PATH = str(Path(__file__).resolve().parents[1] / "data" / "processed" / "nhs.duckdb")
 
 
 def get_connection(db_path: str = DB_PATH, read_only: bool = True) -> duckdb.DuckDBPyConnection:

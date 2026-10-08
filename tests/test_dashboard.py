@@ -1,5 +1,5 @@
-"""Tests for the dashboard's query layer (dashboard_queries.py) — schema
-checks against the real DB. dashboard.py itself is Streamlit UI and isn't
+"""Tests for the dashboard's query layer (app/dashboard_queries.py) — schema
+checks against the real DB. app/dashboard.py itself is Streamlit UI and isn't
 imported here (importing it would trigger st.set_page_config/st.navigation
 outside a live Streamlit run); dashboard_queries.py is deliberately
 Streamlit-free so it can be tested directly.
@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import dashboard_queries as q
+from app import dashboard_queries as q
 
 REAL_DB_PATH = "data/processed/nhs.duckdb"
 KNOWN_TRUST = "RXC"  # present in fact_ae_attendances/fact_rtt_waits/cp_signals throughout this project

@@ -45,7 +45,7 @@ docker:  ## Build the image
 	docker build -t nhs-monitoring-copilot:latest .
 
 dashboard:  ## Serve the Streamlit dashboard against $(DB)
-	$(PY) -m streamlit run dashboard.py
+	$(PY) -m streamlit run app/dashboard.py
 
 clean:  ## Remove caches and generated plots (never touches data/)
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

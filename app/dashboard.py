@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import duckdb
@@ -8,7 +9,11 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-import dashboard_queries as q
+# `streamlit run app/dashboard.py` only puts app/ on sys.path; add the repo root
+# so the `app` package imports resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app import dashboard_queries as q  # noqa: E402
 
 # Set page config
 st.set_page_config(

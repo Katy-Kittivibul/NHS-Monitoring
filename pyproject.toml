@@ -24,8 +24,7 @@ dev = [
 # The .reference subpackages are listed explicitly: this is an exhaustive list, not
 # auto-discovery, so omitting them shipped a wheel with no corr/reference/ at all and
 # an ImportError in corr/tier3_signal_driven.py.
-packages = ["etl", "etl.reference", "dq", "cp", "corr", "corr.reference"]
-py-modules = ["dashboard_queries"]
+packages = ["app", "etl", "etl.reference", "dq", "cp", "corr", "corr.reference"]
 
 [tool.setuptools.package-data]
 # The lookup CSVs are resolved relative to __file__ at runtime, so they have to be

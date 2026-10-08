@@ -84,9 +84,10 @@ NHS/
 ├── docs/                    # Extra notes, including exact column mappings
 ├── reports/plots/           # Scratch comparison plots
 ├── tests/                   # Test suite, one file per package
-├── dashboard.py             # Streamlit dashboard
-├── dashboard_queries.py     # Database queries the dashboard uses
-├── generate_plots.py        # Scratch script for the model comparison plots
+├── app/                     # Streamlit dashboard and plotting
+│   ├── dashboard.py         # Streamlit dashboard
+│   ├── dashboard_queries.py # Database queries the dashboard uses
+│   └── generate_plots.py    # Scratch script for the model comparison plots
 ├── requirements.txt
 └── README.md
 ```
@@ -124,7 +125,7 @@ python -m pytest tests/ -q
 Launch the dashboard:
 
 ```bash
-streamlit run dashboard.py
+streamlit run app/dashboard.py
 ```
 
 ## Status
