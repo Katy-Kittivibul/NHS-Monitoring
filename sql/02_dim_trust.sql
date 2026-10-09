@@ -44,14 +44,26 @@ icb AS (
            MIN(icb_name) AS ods_icb_name
     FROM reporting.trust_icb_current
     GROUP BY trust_code
+),
+-- Fallback region from the trust's ICBs: only when every ICB is known and they all share one region
+-- (so a Multiple ICBs trust keeps its region if its ICBs agree); otherwise NULL.
+icb_region AS (
+    SELECT t.trust_code,
+           MIN(r.region_code) AS region_code,
+           MIN(r.region_name) AS region_name
+    FROM reporting.trust_icb_current t
+    LEFT JOIN reporting.icb_to_region r ON r.icb_code = t.icb_code
+    WHERE t.icb_code IS NOT NULL
+    GROUP BY t.trust_code
+    HAVING COUNT(*) = COUNT(r.region_code) AND COUNT(DISTINCT r.region_code) = 1
 )
 SELECT
     c.org_code,
     l.org_name                                          AS trust_name,
     CASE WHEN c.org_code ~ '^R[A-Z0-9]{2}$' THEN 'NHS trust'
-         ELSE 'Other provider (UTC, walk-in centre, practice or independent)' END AS provider_type,
-    COALESCE(rm.region_code, 'UNKNOWN')                 AS region_code,
-    COALESCE(rm.region_name, 'Unknown')                 AS region_name,
+         ELSE 'Other provider' END AS provider_type,
+    COALESCE(rm.region_code, ir.region_code, 'UNKNOWN') AS region_code,
+    COALESCE(rm.region_name, ir.region_name, 'Unknown') AS region_name,
     CASE WHEN COALESCE(i.n_icbs, 0) = 1 THEN i.icb_code
          WHEN COALESCE(i.n_icbs, 0) > 1 THEN 'MULTI'
          ELSE 'UNMAPPED' END                            AS icb_code,
@@ -74,5 +86,6 @@ LEFT JOIN reporting.dim_organisation o ON o.org_code = c.org_code
 JOIN latest_obs l ON l.org_code = c.org_code
 LEFT JOIN region_map rm ON rm.ae_label = l.region_ref OR rm.region_code = l.region_ref
 LEFT JOIN icb i ON i.trust_code = c.org_code
+LEFT JOIN icb_region ir ON ir.trust_code = c.org_code
 LEFT JOIN reporting.icb_to_region r ON r.icb_code = i.icb_code
 CROSS JOIN latest_month lm;

@@ -1,5 +1,5 @@
 -- Purpose: XmR (individuals and moving-range) control chart per trust and measure, flagging points outside limits and runs of 7+ on one side of the mean.
--- Note: Limits are mean +/- 2.66 x average moving range over the trust's full history; only trusts with 15+ monthly points per measure are included.
+-- Note: Limits are mean +/- 2.66 x average moving range over the trust's full history, clipped to 0-100 (they are percentages); only trusts with 15+ monthly points per measure are included.
 DROP VIEW IF EXISTS reporting.vw_spc_xmr CASCADE;
 CREATE VIEW reporting.vw_spc_xmr AS
 WITH series AS (
@@ -32,8 +32,8 @@ limits AS (
 ),
 sided AS (
     SELECT l.*,
-           l.mean_value + 2.66 * l.avg_moving_range AS upper_limit,
-           l.mean_value - 2.66 * l.avg_moving_range AS lower_limit,
+           LEAST(100.0,    l.mean_value + 2.66 * l.avg_moving_range) AS upper_limit,
+           GREATEST(0.0,   l.mean_value - 2.66 * l.avg_moving_range) AS lower_limit,
            CASE WHEN l.value > l.mean_value THEN 1
                 WHEN l.value < l.mean_value THEN -1 ELSE 0 END AS side
     FROM limits l

@@ -97,3 +97,42 @@ def test_rtt_national_total_equals_c999_sum(pg_schema):
     assert mismatched == 0
     assert _one(pg_schema, "SELECT SUM(waiting_list_size) FROM {s}.vw_rtt_performance "
                            "WHERE month_date = '2024-03-01'") == 7155769
+
+
+def test_benchmark_national_equals_weighted_national(pg_schema):
+    """National figures must be weighted over all providers, matching the performance views."""
+    ae = _one(pg_schema, """
+        SELECT COUNT(*) FROM (
+            SELECT b.month_date, b.national_pct,
+                   (SELECT 100.0 * SUM(within_4hr) / SUM(attendances) FROM {s}.vw_ae_performance a
+                    WHERE a.month_date = b.month_date) AS expected
+            FROM (SELECT DISTINCT month_date, national_pct FROM {s}.vw_benchmark
+                  WHERE measure = 'AE_4HR_PERFORMANCE') b
+        ) x WHERE ABS(national_pct - expected) > 1e-9""")
+    assert ae == 0
+    rtt = _one(pg_schema, """
+        SELECT COUNT(*) FROM (
+            SELECT b.national_pct,
+                   (SELECT 100.0 * SUM(within_18wk) / SUM(waiting_list_size) FROM {s}.vw_rtt_performance r
+                    WHERE r.month_date = b.month_date) AS expected
+            FROM (SELECT DISTINCT month_date, national_pct FROM {s}.vw_benchmark
+                  WHERE measure = 'RTT_18WK_PERFORMANCE') b
+        ) x WHERE ABS(national_pct - expected) > 1e-9""")
+    assert rtt == 0
+    dec_2024 = _one(pg_schema, "SELECT ROUND(MAX(national_pct), 2) FROM {s}.vw_benchmark "
+                               "WHERE measure = 'AE_4HR_PERFORMANCE' AND month_date = '2024-12-01'")
+    assert float(dec_2024) == 70.46
+
+
+def test_benchmark_contains_only_active_nhs_trusts(pg_schema):
+    assert _one(pg_schema, """
+        SELECT COUNT(*) FROM {s}.vw_benchmark b JOIN {s}.vw_dim_trust d USING (org_code)
+        WHERE d.provider_type <> 'NHS trust' OR NOT d.is_active""") == 0
+    assert _one(pg_schema, "SELECT COUNT(*) FROM {s}.vw_benchmark WHERE rank_in_region IS NOT NULL "
+                           "AND region_name = 'Unknown'") == 0
+    assert _one(pg_schema, "SELECT COUNT(DISTINCT provider_type) FROM {s}.vw_dim_trust") == 2
+
+
+def test_spc_limits_within_0_100(pg_schema):
+    assert _one(pg_schema, "SELECT COUNT(*) FROM {s}.vw_spc_xmr "
+                           "WHERE lower_limit < 0 OR upper_limit > 100 OR lower_limit > upper_limit") == 0
