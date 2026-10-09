@@ -136,3 +136,29 @@ def test_benchmark_contains_only_active_nhs_trusts(pg_schema):
 def test_spc_limits_within_0_100(pg_schema):
     assert _one(pg_schema, "SELECT COUNT(*) FROM {s}.vw_spc_xmr "
                            "WHERE lower_limit < 0 OR upper_limit > 100 OR lower_limit > upper_limit") == 0
+
+
+def test_type1_attendances_never_exceed_total(pg_schema):
+    assert _one(pg_schema, "SELECT COUNT(*) FROM {s}.vw_ae_performance "
+                           "WHERE type1_attendances > attendances "
+                           "OR type1_breaches_4hr > type1_attendances") == 0
+    assert _one(pg_schema, "SELECT COUNT(*) FROM {s}.vw_ae_performance "
+                           "WHERE type1_attendances = 0 AND type1_performance_pct IS NOT NULL") == 0
+
+
+def test_no_trust_without_type1_is_ranked_for_ae(pg_schema):
+    assert _one(pg_schema, """
+        SELECT COUNT(*) FROM {s}.vw_benchmark b JOIN {s}.vw_dim_trust d USING (org_code)
+        WHERE b.measure IN ('AE_4HR_PERFORMANCE', 'AE_4HR_TYPE1') AND NOT d.has_type1_ae
+          AND (b.rank_in_region IS NOT NULL OR b.rank_national IS NOT NULL)""") == 0
+    # the Type 1 measure only covers trusts with Type 1 activity, and its national figure is weighted
+    assert _one(pg_schema, """
+        SELECT COUNT(*) FROM {s}.vw_benchmark b JOIN {s}.vw_dim_trust d USING (org_code)
+        WHERE b.measure = 'AE_4HR_TYPE1' AND NOT d.has_type1_ae""") == 0
+    assert _one(pg_schema, """
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT b.month_date, b.national_pct,
+                   (SELECT 100.0 * SUM(type1_attendances - type1_breaches_4hr) / SUM(type1_attendances)
+                    FROM {s}.vw_ae_performance a WHERE a.month_date = b.month_date) AS expected
+            FROM {s}.vw_benchmark b WHERE b.measure = 'AE_4HR_TYPE1'
+        ) x WHERE ABS(national_pct - expected) > 1e-9""") == 0

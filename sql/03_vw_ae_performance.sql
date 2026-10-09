@@ -1,4 +1,4 @@
--- Purpose: trust x month A&E 4-hour performance (all types) against the national target, with 3-month rolling and year-on-year comparison.
+-- Purpose: trust x month A&E 4-hour performance (all types headline, Type 1 reported separately) against the national target, with 3-month rolling and year-on-year comparison.
 -- Sources: Target by financial year, applied to every month of that year (the guidance sets it "by/in March"); the constitutional standard is 95% throughout.
 --   FY2023/24 76%: NHS England, "Delivery plan for recovering urgent and emergency care services" (Jan 2023): "76% performance in A&E wait times, measured through the 4-hour target" - https://www.england.nhs.uk/long-read/delivery-plan-for-recovering-urgent-and-emergency-care-services/
 --   FY2024/25 78%: NHS England, "2024/25 priorities and operational planning guidance": "a minimum of 78% of patients seen within 4 hours in March 2025" - https://www.england.nhs.uk/long-read/2024-25-priorities-and-operational-planning-guidance/
@@ -15,6 +15,10 @@ base AS (
            total_attendances                          AS attendances,
            total_breaches_4hr                         AS breaches_4hr,
            total_attendances - total_breaches_4hr     AS within_4hr,
+           attendances_type1                          AS type1_attendances,
+           breaches_4hr_type1                         AS type1_breaches_4hr,
+           CASE WHEN attendances_type1 > 0
+                THEN 100.0 * (attendances_type1 - breaches_4hr_type1) / attendances_type1 END AS type1_performance_pct,
            CASE WHEN total_attendances > 0
                 THEN 100.0 * (total_attendances - total_breaches_4hr) / total_attendances END AS performance_pct,
            CASE WHEN EXTRACT(MONTH FROM month_date) >= 4
@@ -46,7 +50,10 @@ SELECT
          THEN 100.0 * r.w_within / r.w_attendances END AS rolling_3m_performance_pct,
     r.performance_pct - p.performance_pct              AS yoy_change_pp,
     CASE WHEN p.attendances > 0
-         THEN 100.0 * (r.attendances - p.attendances) / p.attendances END AS attendances_yoy_pct
+         THEN 100.0 * (r.attendances - p.attendances) / p.attendances END AS attendances_yoy_pct,
+    r.type1_attendances,
+    r.type1_breaches_4hr,
+    r.type1_performance_pct
 FROM rolling r
 LEFT JOIN standards s ON s.fy_start_year = r.fy_start_year
 LEFT JOIN base p ON p.org_code = r.org_code

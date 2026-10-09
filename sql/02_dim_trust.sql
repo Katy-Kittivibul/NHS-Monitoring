@@ -34,6 +34,11 @@ coverage AS (
     FROM obs
     GROUP BY org_code
 ),
+latest_ae AS (
+    SELECT DISTINCT ON (org_code) org_code, attendances_type1
+    FROM reporting.fact_ae_attendances
+    ORDER BY org_code, month_date DESC
+),
 latest_month AS (
     SELECT MAX(month_date) AS latest_month FROM obs
 ),
@@ -76,6 +81,7 @@ SELECT
          ELSE 'Unmapped' END                            AS icb_mapping_status,
     c.reports_ae,
     c.reports_rtt,
+    (COALESCE(la.attendances_type1, 0) > 0)             AS has_type1_ae,
     c.first_month,
     c.last_month,
     c.months_reported,
@@ -84,6 +90,7 @@ SELECT
 FROM coverage c
 LEFT JOIN reporting.dim_organisation o ON o.org_code = c.org_code
 JOIN latest_obs l ON l.org_code = c.org_code
+LEFT JOIN latest_ae la ON la.org_code = c.org_code
 LEFT JOIN region_map rm ON rm.ae_label = l.region_ref OR rm.region_code = l.region_ref
 LEFT JOIN icb i ON i.trust_code = c.org_code
 LEFT JOIN icb_region ir ON ir.trust_code = c.org_code

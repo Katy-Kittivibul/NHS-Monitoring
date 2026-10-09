@@ -7,6 +7,11 @@ WITH series AS (
     FROM reporting.vw_ae_performance
     WHERE performance_pct IS NOT NULL
     UNION ALL
+    SELECT a.org_code, 'AE_4HR_TYPE1' AS measure, a.month_date, a.type1_performance_pct AS value
+    FROM reporting.vw_ae_performance a
+    JOIN reporting.vw_dim_trust d ON d.org_code = a.org_code AND d.has_type1_ae
+    WHERE a.type1_performance_pct IS NOT NULL
+    UNION ALL
     SELECT org_code, 'RTT_18WK_PERFORMANCE' AS measure, month_date, pct_within_18wk AS value
     FROM reporting.vw_rtt_performance
     WHERE pct_within_18wk IS NOT NULL
