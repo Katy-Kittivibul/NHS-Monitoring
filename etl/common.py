@@ -17,7 +17,7 @@ def get_connection(db_path: str = "data/processed/nhs.duckdb"):
     return duckdb.connect(db_path)
 
 
-def create_dim_date(conn, start_date: str = "2020-01-01", end_date: str = "2025-12-31"):
+def create_dim_date(conn, start_date: str = "2020-01-01", end_date: str = "2027-12-31"):
     """Create dim_date dimension table with month-level granularity."""
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")

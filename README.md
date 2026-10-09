@@ -38,6 +38,7 @@ One thing worth saying plainly: this is all correlation on observational data. I
 - **Some trusts show A&E and elective waiting times moving together.** A handful of trusts have a strong correlation (r > 0.6) between A&E breaches and elective waiting list breaches. That fits with a shared bed or staffing problem, but correlation alone doesn't prove it.
 - **Picking the right changepoint model made a real difference.** Two cost models were tested against each other across 10 trusts. One of them (l2 with a BIC penalty) won 3, tied 4, and never lost against the other (rbf with a fixed penalty). Full comparison in `cp/changepoints.py`.
 - **A single trust's data going missing for a month was easy to miss.** A dataset wide check looks at total row counts, so one trust dropping out for a month barely moves the number. A separate per organisation check catches this instead, and it found a real case (see Stage 1 below).
+- **The Feb 2026 A&E file marks its totals row differently.** It has `Org Code = TOTAL` with a normal Period, so the old filter loaded it as a fake organisation and doubled that month's national attendances (4.09M instead of 2.04M). The parser now drops totals by either column, and a Stage 1 check fails if any org code or name is `TOTAL`.
 
 ## How it works
 

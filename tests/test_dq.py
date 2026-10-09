@@ -1,5 +1,6 @@
 """Tests for Stage 1 data quality drift checks."""
 import sys
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -10,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dq.ae_attendances import run_ae_attendances_dq
 from dq.checks import (
+    check_no_total_org,
     check_null_rate_jump,
     check_org_missing_vs_prior_month,
     check_org_never_reported,
@@ -441,3 +443,30 @@ class TestRealDataIntegration:
         finally:
             conn.close()
         assert datasets == {"ae_attendances", "rtt_waits", "prescribing", "dental_uda"}
+
+
+# --- check_no_total_org -------------------------------------------------------
+
+class TestNoTotalOrg:
+    def test_total_row_fails_only_its_month(self, synthetic_conn):
+        df = pd.DataFrame({
+            "month_date": [pd.Timestamp("2024-01-01")] * 2 + [pd.Timestamp("2024-02-01")] * 2,
+            "org_code": ["R1A", "R1B", "R1A", " total "],
+            "org_name": ["A", "B", "A", "TOTAL"],
+        })
+        _make_table(synthetic_conn, "fact_test", df)
+
+        flags = check_no_total_org(synthetic_conn, "test_ds", "fact_test", ["org_code", "org_name"])
+        by_month = {f["month_date"]: f["status"] for f in flags}
+        assert by_month == {date(2024, 1, 1): "OK", date(2024, 2, 1): "FAIL"}
+
+    def test_dimension_without_month_column(self, synthetic_conn):
+        df = pd.DataFrame({"org_code": ["R1A", "TOTAL"], "org_name": ["A", "Total"]})
+        synthetic_conn.register("dim_view", df)
+        synthetic_conn.execute("CREATE TABLE dim_test AS SELECT * FROM dim_view")
+
+        flags = check_no_total_org(
+            synthetic_conn, "test_ds", "dim_test", ["org_code", "org_name"],
+            month_col=None, report_months=[pd.Timestamp("2024-01-01")], check_name="no_total_org_dim",
+        )
+        assert [f["status"] for f in flags] == ["FAIL"]

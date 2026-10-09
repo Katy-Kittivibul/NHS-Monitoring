@@ -26,3 +26,12 @@ venv/
 CLAUDE.md
 .venv/
 env/
+
+# Power BI: keep the text-based PBIP project in git, not binary .pbix or local caches
+*.pbix
+*.pbit
+**/.pbi/cache.abf
+**/.pbi/localSettings.json
+
+# Flat-file exports consumed by Power BI (regenerated from the DuckDB database)
+data/exports/

@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dq.checks import (
+    check_no_total_org,
     check_null_rate_jump,
     check_org_missing_vs_prior_month,
     check_org_never_reported,
@@ -36,6 +37,13 @@ def run_ae_attendances_dq(db_path: str = "data/processed/nhs.duckdb") -> list[di
         flags += check_out_of_range(conn, DATASET, TABLE, "total_breaches_4hr", min_val=0)
         flags += check_org_missing_vs_prior_month(conn, DATASET, TABLE, org_col="org_code")
         flags += check_org_never_reported(conn, DATASET, TABLE, org_col="org_code", dim_org_type="trust")
+
+        flags += check_no_total_org(conn, DATASET, TABLE, ["org_code", "org_name"])
+        months = [r[0] for r in conn.execute(f"SELECT DISTINCT month_date FROM {TABLE}").fetchall()]
+        flags += check_no_total_org(
+            conn, DATASET, "dim_organisation", ["org_code", "org_name"],
+            month_col=None, report_months=months, check_name="no_total_org_dim",
+        )
 
         write_flags(conn, flags)
         print(f"[OK] DQ checks complete for {DATASET}: {len(flags)} flags written")

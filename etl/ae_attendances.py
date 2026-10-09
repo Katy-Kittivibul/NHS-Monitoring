@@ -47,8 +47,14 @@ def load_ae_attendances(csv_path: str = "data/raw/ae_attendances_202403.csv"):
     """Load and transform A&E attendances data."""
     df = pd.read_csv(csv_path)
 
-    # Filter out totals row (case-insensitive, whitespace-trimmed)
-    df = df[~df["Period"].astype(str).str.strip().str.upper().str.startswith("TOTAL")].copy()
+    # Filter out the totals row (case-insensitive, whitespace-trimmed). Most files mark it
+    # in Period, but the Feb 2026 file has a normal Period and only Org Code = TOTAL, which
+    # otherwise loads as a fake organisation and doubles the national total.
+    is_total = (
+        df["Period"].astype(str).str.strip().str.upper().str.startswith("TOTAL")
+        | (df["Org Code"].astype(str).str.strip().str.upper() == "TOTAL")
+    )
+    df = df[~is_total].copy()
 
     # Parse month date from Period column
     df["month_date"] = df["Period"].apply(parse_ae_period)

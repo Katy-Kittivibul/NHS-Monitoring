@@ -25,6 +25,7 @@ __all__ = [
     "check_out_of_range",
     "check_org_missing_vs_prior_month",
     "check_org_never_reported",
+    "check_no_total_org",
 ]
 
 
@@ -241,3 +242,33 @@ def check_org_never_reported(conn, dataset, table, org_col, dim_org_type, month_
 
     return [{"dataset": dataset, "month_date": latest_month, "check_name": "org_never_reported",
              "status": status, "detail": detail}]
+
+
+def check_no_total_org(conn, dataset, table, columns, month_col="month_date", report_months=None,
+                       check_name="no_total_org"):
+    """FAIL if any of `columns` equals 'TOTAL' (trimmed, case-insensitive).
+
+    A source file's totals row that slips past the ETL filter loads as a fake
+    organisation. With `month_col` the check runs per month in `table`; for tables with
+    no month column (dim_organisation) pass `month_col=None` and `report_months`, the
+    months the flag is recorded against.
+    """
+    cond = " OR ".join(f"UPPER(TRIM(CAST({c} AS VARCHAR))) = 'TOTAL'" for c in columns)
+    if month_col:
+        rows = conn.execute(f"""
+            SELECT {month_col} AS month_date, COUNT(*) FILTER (WHERE {cond}) AS n
+            FROM {table} GROUP BY {month_col} ORDER BY {month_col}
+        """).fetchall()
+    else:
+        n = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {cond}").fetchone()[0]
+        rows = [(m, n) for m in (report_months or [])]
+
+    flags = []
+    for month, n in rows:
+        if n:
+            status, detail = "FAIL", f"{n} row(s) in {table} with {'/'.join(columns)} = 'TOTAL'"
+        else:
+            status, detail = "OK", f"no TOTAL rows in {table}"
+        flags.append({"dataset": dataset, "month_date": month, "check_name": check_name,
+                      "status": status, "detail": detail})
+    return flags
