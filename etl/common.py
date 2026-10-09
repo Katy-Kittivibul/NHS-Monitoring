@@ -199,9 +199,14 @@ def ensure_schema_exists(conn):
             over_18wk_count BIGINT,
             over_18wk_pct DOUBLE,
             median_wait_weeks DOUBLE,
+            over_52wk_count BIGINT,
             PRIMARY KEY (month_date, org_code, specialty_code)
         )
     """)
+    # over_52wk_count was added after the first loads; CREATE TABLE IF NOT EXISTS is a
+    # no-op on an existing table, so migrate it. Pre-existing rows are NULL until the
+    # RTT files are reloaded by etl/rtt_waits.py.
+    conn.execute("ALTER TABLE fact_rtt_waits ADD COLUMN IF NOT EXISTS over_52wk_count BIGINT")
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fact_prescribing (

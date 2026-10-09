@@ -5,7 +5,7 @@
 DB ?= data/processed/nhs.duckdb
 PY ?= python
 
-.PHONY: help install pipeline etl dq cp corr tier3 reporting test test-hermetic lint docker dashboard clean
+.PHONY: help install pipeline etl dq cp corr tier3 reporting views test test-hermetic lint docker dashboard clean
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -34,6 +34,9 @@ tier3: corr  ## Stage 3 Tier 3 — needs network: one NHS ODS API call per trust
 
 reporting:  ## Full-refresh the PostgreSQL "reporting" schema from $(DB) (needs .env, see .env.example)
 	$(PY) reporting/load_postgres.py $(DB)
+
+views:  ## Create/refresh the reporting.* Power BI views from sql/ (run `make reporting` first)
+	$(PY) reporting/apply_views.py
 
 test:  ## Full suite (data-dependent tests run only if the DuckDB file exists)
 	$(PY) -m pytest -q -ra

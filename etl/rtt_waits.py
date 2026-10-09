@@ -104,6 +104,16 @@ def load_rtt_waits(xlsx_path: str = "data/raw/rtt_incomplete_provider_202403.xls
         axis=1
     )
 
+    # Pathways waiting 52+ weeks: the workbook's own "Total 52 plus weeks" column, else the
+    # sum of the >52-53 ... 104 plus bins.
+    if "Total 52 plus weeks" in df.columns:
+        df["over_52wk_count"] = df["Total 52 plus weeks"].apply(clean_rtt_value)
+    else:
+        over_52_cols = [c for c in over_18wk_cols if "104 plus" in c or int(c.split("-")[0][1:]) >= 52]
+        df["over_52wk_count"] = df[over_52_cols].apply(
+            lambda row: sum(clean_rtt_value(v) for v in row), axis=1
+        ) if over_52_cols else 0
+
     # Median wait weeks
     median_cols = [c for c in df.columns if "median" in c.lower() or "50th" in c.lower()]
     if median_cols:
@@ -117,7 +127,8 @@ def load_rtt_waits(xlsx_path: str = "data/raw/rtt_incomplete_provider_202403.xls
     result = df[[
         "month_date", "org_code", "org_name", "region_code",
         "specialty_code", "specialty_name", "waiting_list_size",
-        "over_18wk_count", "over_18wk_pct", "median_wait_weeks"
+        "over_18wk_count", "over_18wk_pct", "median_wait_weeks",
+        "over_52wk_count"
     ]].copy()
 
     return result

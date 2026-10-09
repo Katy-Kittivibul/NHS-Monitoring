@@ -68,12 +68,14 @@ TABLES = [
     {
         "name": "fact_rtt_waits",
         "source": "SELECT month_date, org_code, org_name, region_code, specialty_code, specialty_name, "
-                  "waiting_list_size, over_18wk_count, over_18wk_pct, median_wait_weeks FROM fact_rtt_waits",
+                  "waiting_list_size, over_18wk_count, over_18wk_pct, median_wait_weeks, over_52wk_count "
+                  "FROM fact_rtt_waits",
         "columns": [
             ("month_date", "date NOT NULL"), ("org_code", "text NOT NULL"), ("org_name", "text"),
             ("region_code", "text"), ("specialty_code", "text NOT NULL"), ("specialty_name", "text"),
             ("waiting_list_size", "bigint"), ("over_18wk_count", "bigint"),
             ("over_18wk_pct", "double precision"), ("median_wait_weeks", "double precision"),
+            ("over_52wk_count", "bigint"),
         ],
         "constraints": ["PRIMARY KEY (month_date, org_code, specialty_code)"],
         "indexes": [("org_code, month_date", "org_month")],
@@ -112,6 +114,19 @@ CSV_TABLES = [
         # A trust that maps to several ICBs has several rows, and unresolved trusts have no
         # icb_code, so (trust_code, icb_code) cannot be a PRIMARY KEY (NULL). Use a surrogate
         # key plus a uniqueness guarantee that treats a missing ICB as ''.
+        "surrogate_key": True,
+        "unique_expr": "trust_code, COALESCE(icb_code, '')",
+        "indexes": [("trust_code", "trust")],
+    },
+    {
+        # Every fact-table trust's ICB(s) as at its last reporting month (see
+        # corr/reference/trust_icb_current.py); feeds reporting.vw_dim_trust.
+        "name": "trust_icb_current",
+        "csv": REFERENCE_DIR / "trust_icb_current.csv",
+        "columns": [
+            ("trust_code", "text NOT NULL"), ("as_of_month", "date"), ("icb_code", "text"),
+            ("icb_name", "text"), ("n_icbs", "integer"), ("resolution_status", "text"),
+        ],
         "surrogate_key": True,
         "unique_expr": "trust_code, COALESCE(icb_code, '')",
         "indexes": [("trust_code", "trust")],
@@ -220,7 +235,8 @@ def load_reporting(db_path: str = "data/processed/nhs.duckdb", settings: dict | 
                 out = Path(tmp) / f"{name}.csv"
                 src_count = _export_csv(src, select, out)
 
-                cur.execute(f"DROP TABLE IF EXISTS {SCHEMA}.{name}")
+                # CASCADE drops the sql/ views that depend on the table; they are rebuilt below.
+                cur.execute(f"DROP TABLE IF EXISTS {SCHEMA}.{name} CASCADE")
                 cur.execute(create_table_sql(spec))
                 _copy_in(cur, spec, out)
                 for stmt in index_sql(spec):
@@ -228,6 +244,10 @@ def load_reporting(db_path: str = "data/processed/nhs.duckdb", settings: dict | 
                 cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.{name}")
                 results.append((name, src_count, cur.fetchone()[0]))
             verify_counts(results)  # raising here leaves `with pg` to roll back
+            from reporting.apply_views import apply_views  # same transaction: never a schema without views
+
+            apply_views(pg)
+            print("[OK] Re-applied the sql/ views")
         print(f"[OK] Refreshed schema '{SCHEMA}' ({len(results)} tables)")
     finally:
         pg.close()

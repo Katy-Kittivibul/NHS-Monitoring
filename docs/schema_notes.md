@@ -50,7 +50,7 @@ This document records the empirical findings from inspecting raw sample files fo
 - **Actual Grain**: Provider × Specialty (Treatment Function Code) × Month.
 - **Header Offset**: Excel sheet headers start at **Row 13** (0-indexed line 12). Rows 0..11 contain title metadata.
 - **Org Code System**: NHS Provider ODS Code (3-character NHS Trust codes e.g. `RP6`, `RGT` or 5-character independent codes e.g. `AY1`).
-- **Specialty Codes**: `Treatment Function Code` (e.g. `C_100` General Surgery, `C_101` Urology, `C_110` Trauma & Orthopaedics, `999` Total).
+- **Specialty Codes**: `Treatment Function Code` (e.g. `C_100` General Surgery, `C_101` Urology, `C_110` Trauma & Orthopaedics, `C_999` Total).
 
 ### Raw to Star Schema Column Mapping (`fact_rtt_waits`)
 
@@ -60,7 +60,7 @@ This document records the empirical findings from inspecting raw sample files fo
 | `org_code` | `Provider Code` | `VARCHAR` | ODS Provider Code (e.g. `RP6`) |
 | `org_name` | `Provider Name` | `VARCHAR` | Provider Name |
 | `region_code` | `Region Code` | `VARCHAR` | Region Code (e.g. `Y56`) |
-| `specialty_code` | `Treatment Function Code` | `VARCHAR` | e.g. `C_100` or `999` |
+| `specialty_code` | `Treatment Function Code` | `VARCHAR` | e.g. `C_100` or `C_999` |
 | `specialty_name` | `Treatment Function` | `VARCHAR` | e.g. `General Surgery Service` |
 | `waiting_list_size` | Sum of week bins / Total column | `BIGINT` | Total incomplete pathways |
 | `over_18wk_count` | Sum of bins `>18-19` to `>104` | `BIGINT` | Derived sum of pathways waiting over 18 weeks |
@@ -69,7 +69,7 @@ This document records the empirical findings from inspecting raw sample files fo
 
 ### Data Quality & Suppression Quirks
 - **Metadata rows**: Header reading must skip top 12 rows.
-- **Aggregate specialty**: Code `999` represents the provider-level total across all specialties. Keep `specialty_code` so queries can filter for `specialty_code = '999'` or group by specialty.
+- **Aggregate specialty**: Code `C_999` (name `Total`) is the provider-level total across all specialties and is stored alongside the specialty rows, so summing `waiting_list_size` over every row double counts (14.3M instead of 7.16M for 2024-03). Filter `specialty_code = 'C_999'` for trust totals, or `<> 'C_999'` for specialty detail; never mix them.
 - **Suppression**: Unreported cells contain `'-'` or `NaN`; replace with `0` or `NULL` appropriately.
 
 ---
