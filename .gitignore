@@ -35,3 +35,6 @@ env/
 
 # Flat-file exports consumed by Power BI (regenerated from the DuckDB database)
 data/exports/
+
+# Local secrets (copy .env.example to .env)
+.env

@@ -5,7 +5,7 @@
 DB ?= data/processed/nhs.duckdb
 PY ?= python
 
-.PHONY: help install pipeline etl dq cp corr tier3 test test-hermetic lint docker dashboard clean
+.PHONY: help install pipeline etl dq cp corr tier3 reporting test test-hermetic lint docker dashboard clean
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -31,6 +31,9 @@ pipeline: corr  ## Run stages 0-3 end to end
 tier3: corr  ## Stage 3 Tier 3 — needs network: one NHS ODS API call per trust
 	$(PY) corr/reference/trust_to_icb.py
 	$(PY) corr/tier3_signal_driven.py
+
+reporting:  ## Full-refresh the PostgreSQL "reporting" schema from $(DB) (needs .env, see .env.example)
+	$(PY) reporting/load_postgres.py $(DB)
 
 test:  ## Full suite (data-dependent tests run only if the DuckDB file exists)
 	$(PY) -m pytest -q -ra
