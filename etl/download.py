@@ -8,14 +8,29 @@ ETL expects:
     ae_attendances_YYYYMM.csv
     rtt_incomplete_provider_YYYYMM.xlsx
 
+NHSBSA dental activity (dental_uda_YYYYMM.csv) comes from the NHSBSA Open Data Portal's
+CKAN API over plain HTTP, so it needs neither Playwright nor a browser.
+
+GP prescribing is deliberately NOT downloaded here. OpenPrescribing's API sits behind a
+Cloudflare bot challenge (HTTP 403 "Just a moment...") for scripted clients, and this
+project does not try to evade it; the NHSBSA English Prescribing Dataset it is built on
+is ~7 GB per month and currently ends at 2025-06. data/raw/openprescribing_spending_*.json
+therefore stays a manual download (see README).
+
 Usage:
     python -m etl.download --list              # print matched links, download nothing
-    python -m etl.download                      # download missing files
+    python -m etl.download                      # download missing A&E + RTT files
     python -m etl.download --headed --force     # headed browser, re-download everything
+    python -m etl.download --datasets dental    # NHSBSA dental only (no browser needed)
+    python -m etl.download --datasets ae,rtt,dental --end 2026-08
 """
 import argparse
+import json
 import re
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 _ROOT = Path(__file__).parent.parent
@@ -100,14 +115,118 @@ def target(kind: str, key) -> Path:
     return RAW_DIR / f"rtt_incomplete_provider_{y}{m:02d}.xlsx"
 
 
+DENTAL_PACKAGE_URL = (
+    "https://opendata.nhsbsa.net/api/3/action/package_show"
+    "?id=english-contractor-monthly-general-dental-activity"
+)
+USER_AGENT = "nhs-monitoring-copilot/0.1 (public-data research project)"
+DENTAL_RESOURCE_RE = re.compile(r"^UDA_CONTRACTOR_(\d{4})(\d{2})$", re.I)
+
+
+def http_get(url: str, retries: int = 3, timeout: int = 120, backoff: float = 2.0) -> bytes:
+    """GET with a timeout and exponential backoff on transient failures (5xx, 429, network).
+    4xx other than 429 fail immediately: retrying a 403/404 cannot help."""
+    last_error = None
+    for attempt in range(retries):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500 and exc.code != 429:
+                raise
+            last_error = exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            last_error = exc
+        if attempt < retries - 1:
+            time.sleep(backoff ** attempt)
+    raise RuntimeError(f"GET {url} failed after {retries} attempts: {last_error}")
+
+
+def dental_resource_urls(package: dict) -> dict:
+    """{(year, month): csv_url} from an NHSBSA CKAN package_show response."""
+    found = {}
+    for resource in package["result"]["resources"]:
+        match = DENTAL_RESOURCE_RE.match(resource.get("name", ""))
+        if match and resource.get("url"):
+            found[(int(match.group(1)), int(match.group(2)))] = resource["url"]
+    return found
+
+
+def looks_like_dental_csv(body: bytes) -> bool:
+    """Guard against saving an HTML error/challenge page as a CSV."""
+    head = body[:2000].lstrip(b"\xef\xbb\xbf").lstrip().upper()
+    return head.startswith(b"YEAR_MONTH") or head.startswith(b'"YEAR_MONTH"')
+
+
+def download_dental(force: bool = False, list_only: bool = False, end=None, raw_dir: Path = None) -> list:
+    """Download dental_uda_YYYYMM.csv for every published month from START up to `end`
+    (default: the latest published). Returns the list of files written."""
+    raw_dir = Path(raw_dir or RAW_DIR)
+    package = json.loads(http_get(DENTAL_PACKAGE_URL, timeout=60))
+    available = dental_resource_urls(package)
+    urls = {k: v for k, v in available.items() if k >= START and (end is None or k <= end)}
+    span = f" to {max(urls)[0]}-{max(urls)[1]:02d}" if urls else ""
+    print(f"[dental] NHSBSA -> {len(urls)} months from {START[0]}-{START[1]:02d}{span}")
+    written = []
+    if not list_only:
+        raw_dir.mkdir(parents=True, exist_ok=True)
+    for key in sorted(urls):
+        dest = raw_dir / f"dental_uda_{key[0]}{key[1]:02d}.csv"
+        if list_only:
+            print(f"  dental {key[0]}-{key[1]:02d}: {urls[key]}")
+            continue
+        if dest.exists() and not force:
+            print(f"  skip (exists) {dest.name}")
+            continue
+        body = http_get(urls[key])
+        if not looks_like_dental_csv(body):
+            raise SystemExit(f"{urls[key]} did not return a dental CSV (first bytes: {body[:80]!r})")
+        tmp = dest.with_suffix(".csv.part")
+        tmp.write_bytes(body)
+        tmp.replace(dest)  # atomic: a killed download never leaves a truncated .csv
+        print(f"  saved {dest.name} ({len(body)} bytes)")
+        written.append(dest)
+    return written
+
+
+def parse_end(text):
+    if not text:
+        return None
+    match = re.fullmatch(r"(\d{4})-(\d{2})", text.strip())
+    if not match:
+        raise SystemExit(f"--end must look like 2026-08, got {text!r}")
+    return int(match.group(1)), int(match.group(2))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true", help="run a visible browser")
     ap.add_argument("--list", action="store_true", help="list matched links only")
     ap.add_argument("--force", action="store_true", help="re-download existing files")
+    ap.add_argument("--datasets", default="ae,rtt",
+                    help="comma-separated subset of: ae, rtt, dental (default: ae,rtt)")
+    ap.add_argument("--end", help="last month to fetch, YYYY-MM (default: latest published)")
     args = ap.parse_args()
 
-    from playwright.sync_api import sync_playwright
+    wanted = {d.strip().lower() for d in args.datasets.split(",") if d.strip()}
+    unknown = wanted - {"ae", "rtt", "dental"}
+    if unknown:
+        raise SystemExit(f"unknown dataset(s): {', '.join(sorted(unknown))}")
+    end = parse_end(args.end)
+
+    if "dental" in wanted:
+        download_dental(force=args.force, list_only=args.list, end=end)
+    if not wanted & {"ae", "rtt"}:
+        return
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise SystemExit(
+            "Playwright is required for A&E/RTT downloads: pip install -e '.[ingest]' "
+            "&& playwright install chromium"
+        )
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -116,12 +235,14 @@ def main():
         page = ctx.new_page()
         links = {"ae": {}, "rtt": {}}
         for kind, pages, matcher in (("ae", AE_PAGES, _match_ae), ("rtt", RTT_PAGES, _match_rtt)):
+            if kind not in wanted:
+                continue
             for url in pages:
                 status, found = collect_links(page, url, matcher)
                 print(f"[{kind}] HTTP {status} {url} -> {len(found)} links")
                 links[kind].update(found)
 
-        for kind in ("ae", "rtt"):
+        for kind in sorted(wanted & {"ae", "rtt"}):
             for key in sorted(links[kind]):
                 text, href, revised = links[kind][key]
                 print(f"  {kind} {key[0]}-{key[1]:02d}: {text!r} -> {href}")
@@ -130,11 +251,15 @@ def main():
             browser.close()
             return
 
-        # A&E and RTT must end on the same month: the latest both have.
-        end = min(max(links["ae"]), max(links["rtt"]))
-        print(f"Common end month: {end[0]}-{end[1]:02d}")
-        for kind in ("ae", "rtt"):
-            for key in sorted(k for k in links[kind] if k <= end):
+        # A&E and RTT must end on the same month: the latest both have (or --end).
+        latest = [max(links[k]) for k in ("ae", "rtt") if k in wanted and links[k]]
+        if not latest:
+            browser.close()
+            raise SystemExit("no matching A&E/RTT links found")
+        stop = min(latest + ([end] if end else []))
+        print(f"Common end month: {stop[0]}-{stop[1]:02d}")
+        for kind in sorted(wanted & {"ae", "rtt"}):
+            for key in sorted(k for k in links[kind] if k <= stop):
                 dest = target(kind, key)
                 if dest.exists() and not args.force:
                     print(f"  skip (exists) {dest.name}")

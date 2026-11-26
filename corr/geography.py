@@ -1,13 +1,13 @@
 """Region resolution for Stage 3 Tier 1 — the geography every fact table
 already reaches, one way or another.
 
-dim_organisation.region_name is not a clean key today: etl/ae_attendances.py
-writes NHS England region *names* ("NHS ENGLAND LONDON") and
-etl/rtt_waits.py writes region *codes* ("Y56") into the same column, each via
-`ON CONFLICT ... DO UPDATE`. Since etl/run_all.py loads RTT after A&E, every
-trust present in both facts ends up holding the code form; trusts present in
-A&E only still hold the name form. Both value spaces are closed (7 codes, 7
-names) and map 1:1 — REGION_FULL_NAME_TO_CODE below normalises them.
+dim_organisation.region_name used to be an unclean key: etl/ae_attendances.py
+wrote NHS England region *names* ("NHS ENGLAND LONDON") and etl/rtt_waits.py wrote
+region *codes* ("Y56") into the same column, whichever loaded last winning. Both
+loads now write the canonical pair (region_code + region_name) via
+etl.common.normalise_region, but databases built before that change still hold
+mixed values, so the normalisation below is kept (REGION_FULL_NAME_TO_CODE,
+imported from etl.common — 7 codes, 7 names, 1:1).
 
 dim_organisation has no ICB->region path at all (every ICB row's region_name
 is NULL) — get_icb_region_map() fills that gap from corr/reference/
@@ -25,21 +25,13 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 
+from etl.common import REGION_FULL_NAME_TO_CODE  # noqa: F401, E402 — single source of truth, re-exported
+
 # Resolved relative to this module, not the CWD: this is a repo-tracked reference
 # file, so it must load identically whether the pipeline is run from the repo
 # root, from Docker (WORKDIR /app), or from pytest's rootdir. Same pattern as
 # corr/reference/trust_to_icb.py's DEFAULT_OUT_PATH.
 DEFAULT_ICB_REGION_PATH = str(Path(__file__).parent / "reference" / "icb_to_region.csv")
-
-REGION_FULL_NAME_TO_CODE = {
-    "NHS ENGLAND LONDON": "Y56",
-    "NHS ENGLAND SOUTH WEST": "Y58",
-    "NHS ENGLAND SOUTH EAST": "Y59",
-    "NHS ENGLAND MIDLANDS": "Y60",
-    "NHS ENGLAND EAST OF ENGLAND": "Y61",
-    "NHS ENGLAND NORTH WEST": "Y62",
-    "NHS ENGLAND NORTH EAST AND YORKSHIRE": "Y63",
-}
 
 _REGION_CODE_PATTERN = re.compile(r"^Y5[6-9]$|^Y6[0-3]$")
 

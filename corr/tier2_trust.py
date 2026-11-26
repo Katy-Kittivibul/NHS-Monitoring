@@ -7,9 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from corr.correlation import rolling_correlation
+from corr.correlation import rolling_correlation, to_first_difference
+from corr.inference import annotate_fdr
 from corr.rollups import get_ae_breach_pct_by_trust, get_rtt_over18wk_pct_by_trust
-from corr.signals import ensure_corr_schema_exists, get_connection, write_corr_signals
+from corr.signals import ensure_corr_schema_exists, get_connection, signal_row, write_corr_signals
 
 TIER = "tier2_trust"
 DATASET_PAIR = "ae_rtt_trust"
@@ -24,13 +25,10 @@ def run_tier2_trust_correlations(db_path: str = "data/processed/nhs.duckdb") -> 
 
         series_a = get_ae_breach_pct_by_trust(conn)
         series_b = get_rtt_over18wk_pct_by_trust(conn)
-        results = rolling_correlation(series_a, series_b)
+        results = rolling_correlation(to_first_difference(series_a), to_first_difference(series_b))
 
-        signals = [{
-            "tier": TIER, "dataset_pair": DATASET_PAIR, "geography_level": GEOGRAPHY_LEVEL,
-            "geography_code": r["key"], "month_date": r["month_date"],
-            "correlation_metric": r["correlation_metric"], "detail": r["detail"],
-        } for r in results]
+        signals = [signal_row(TIER, DATASET_PAIR, GEOGRAPHY_LEVEL, r) for r in results]
+        annotate_fdr(signals, family_keys=("tier", "dataset_pair", "month_date"))
 
         write_corr_signals(conn, TIER, DATASET_PAIR, signals)
         print(f"[OK] Tier 2 {DATASET_PAIR}: {len(signals)} signals")

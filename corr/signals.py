@@ -12,9 +12,19 @@ import pandas as pd
 
 from etl.common import get_connection  # noqa: E402 — reuse the existing connection factory
 
+# p_value / n_obs / ci_* come from the correlation itself; q_value is the Benjamini-Hochberg
+# adjusted p within its test family (corr/inference.py) and is_significant_fdr is q <= 0.05.
+INFERENCE_COLUMNS = [
+    ("p_value", "DOUBLE"), ("n_obs", "INTEGER"), ("ci_low", "DOUBLE"), ("ci_high", "DOUBLE"),
+    ("q_value", "DOUBLE"), ("is_significant_fdr", "BOOLEAN"),
+]
+SIGNAL_COLUMNS = ["tier", "dataset_pair", "geography_level", "geography_code", "month_date",
+                  "correlation_metric", "detail"] + [c for c, _ in INFERENCE_COLUMNS]
+
 __all__ = [
     "get_connection",
     "ensure_corr_schema_exists",
+    "signal_row",
     "write_corr_signals",
 ]
 
@@ -33,6 +43,11 @@ def ensure_corr_schema_exists(conn):
             PRIMARY KEY (tier, dataset_pair, geography_code, month_date)
         )
     """)
+    # Inference columns (Phase 2). Databases created before then lack them; ADD COLUMN IF NOT
+    # EXISTS keeps old files usable. Rows written before the upgrade have NULLs here until
+    # the stage is re-run.
+    for column, ddl in INFERENCE_COLUMNS:
+        conn.execute(f"ALTER TABLE corr_signals ADD COLUMN IF NOT EXISTS {column} {ddl}")
     # The dashboard reads tier 1 and tier 2 through these views rather than
     # filtering corr_signals inline. Tier literals are defined in
     # corr/tier1_region.py and corr/tier2_trust.py; keep them in step.
@@ -46,6 +61,17 @@ def ensure_corr_schema_exists(conn):
     """)
 
 
+def signal_row(tier: str, dataset_pair: str, geography_level: str, result: dict) -> dict:
+    """A corr_signals row from one rolling_correlation() result."""
+    return {
+        "tier": tier, "dataset_pair": dataset_pair, "geography_level": geography_level,
+        "geography_code": result["key"], "month_date": result["month_date"],
+        "correlation_metric": result["correlation_metric"], "detail": result["detail"],
+        "p_value": result["p_value"], "n_obs": result["n_obs"],
+        "ci_low": result["ci_low"], "ci_high": result["ci_high"],
+    }
+
+
 def write_corr_signals(conn, tier: str, dataset_pair: str, signals: list[dict]):
     """Idempotently write signals for one (tier, dataset_pair) pair.
 
@@ -57,5 +83,5 @@ def write_corr_signals(conn, tier: str, dataset_pair: str, signals: list[dict]):
     conn.execute("DELETE FROM corr_signals WHERE tier = ? AND dataset_pair = ?", [tier, dataset_pair])
     if not signals:
         return
-    df = pd.DataFrame(signals)  # noqa: F841 — referenced by name in SQL below
-    conn.execute("INSERT INTO corr_signals SELECT * FROM df")
+    df = pd.DataFrame(signals).reindex(columns=SIGNAL_COLUMNS)  # noqa: F841 — used by name in SQL
+    conn.execute(f"INSERT INTO corr_signals ({', '.join(SIGNAL_COLUMNS)}) SELECT * FROM df")

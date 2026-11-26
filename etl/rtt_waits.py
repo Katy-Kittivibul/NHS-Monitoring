@@ -10,7 +10,18 @@ from datetime import datetime
 
 import pandas as pd
 
-from etl.common import ensure_schema_exists, get_connection  # noqa: E402 — after the sys.path shim above
+from etl.common import (  # noqa: E402 — after the sys.path shim above
+    ensure_schema_exists,
+    get_connection,
+    ingest_files,
+    normalise_region,
+    replace_months,
+    safe_pct,
+    to_float_series,
+    to_int_frame,
+    to_int_series,
+    upsert_organisations,
+)
 
 
 def parse_rtt_filename_date(filename: str) -> datetime:
@@ -67,15 +78,13 @@ def load_rtt_waits(xlsx_path: str = "data/raw/rtt_incomplete_provider_202403.xls
     # Calculate waiting_list_size from Total column (if exists) or sum of week bins
     total_cols = [c for c in df.columns if "Total number of incomplete pathways" in c or c == "Total"]
     if total_cols:
-        df["waiting_list_size"] = df[total_cols[0]].apply(clean_rtt_value)
+        df["waiting_list_size"] = to_int_series(df[total_cols[0]])
     else:
         week_cols = [c for c in df.columns if c not in [
             "month_date", "org_code", "org_name", "region_code",
             "specialty_code", "specialty_name"
         ]]
-        df["waiting_list_size"] = df[week_cols].apply(
-            lambda row: sum(clean_rtt_value(v) for v in row), axis=1
-        )
+        df["waiting_list_size"] = to_int_frame(df[week_cols]).sum(axis=1).astype("int64")
 
     # Calculate over_18wk_count (sum of bins >18 weeks)
     over_18wk_cols = []
@@ -91,35 +100,28 @@ def load_rtt_waits(xlsx_path: str = "data/raw/rtt_incomplete_provider_202403.xls
             over_18wk_cols.append(c)
 
     if over_18wk_cols:
-        df["over_18wk_count"] = df[over_18wk_cols].apply(
-            lambda row: sum(clean_rtt_value(v) for v in row), axis=1
-        )
+        df["over_18wk_count"] = to_int_frame(df[over_18wk_cols]).sum(axis=1).astype("int64")
     else:
         df["over_18wk_count"] = 0
 
     # Calculate over_18wk_pct (avoid division by zero)
-    df["over_18wk_pct"] = df.apply(
-        lambda row: (row["over_18wk_count"] / row["waiting_list_size"] * 100.0)
-        if row["waiting_list_size"] > 0 else 0.0,
-        axis=1
-    )
+    df["over_18wk_pct"] = safe_pct(df["over_18wk_count"], df["waiting_list_size"])
 
     # Pathways waiting 52+ weeks: the workbook's own "Total 52 plus weeks" column, else the
     # sum of the >52-53 ... 104 plus bins.
     if "Total 52 plus weeks" in df.columns:
-        df["over_52wk_count"] = df["Total 52 plus weeks"].apply(clean_rtt_value)
+        df["over_52wk_count"] = to_int_series(df["Total 52 plus weeks"])
     else:
         over_52_cols = [c for c in over_18wk_cols if "104 plus" in c or int(c.split("-")[0][1:]) >= 52]
-        df["over_52wk_count"] = df[over_52_cols].apply(
-            lambda row: sum(clean_rtt_value(v) for v in row), axis=1
-        ) if over_52_cols else 0
+        if over_52_cols:
+            df["over_52wk_count"] = to_int_frame(df[over_52_cols]).sum(axis=1).astype("int64")
+        else:
+            df["over_52wk_count"] = 0
 
     # Median wait weeks
     median_cols = [c for c in df.columns if "median" in c.lower() or "50th" in c.lower()]
     if median_cols:
-        df["median_wait_weeks"] = df[median_cols[0]].apply(
-            lambda x: float(x) if pd.notna(x) and x != "-" and x != "" else 0.0
-        )
+        df["median_wait_weeks"] = to_float_series(df[median_cols[0]])
     else:
         df["median_wait_weeks"] = 0.0
 
@@ -134,55 +136,34 @@ def load_rtt_waits(xlsx_path: str = "data/raw/rtt_incomplete_provider_202403.xls
     return result
 
 
-def etl_rtt_waits(db_path: str = "data/processed/nhs.duckdb"):
+def _write_rtt(conn, df):
+    replace_months(conn, "fact_rtt_waits", df)
+
+    # Update dim_organisation with providers from this dataset
+    org_rows = df[["org_code", "org_name", "region_code"]].drop_duplicates("org_code", keep="last").copy()
+    raw_region = org_rows["region_code"]
+    regions = raw_region.map(normalise_region)
+    org_rows["region_code"] = regions.map(lambda pair: pair[0])
+    # Unrecognised values are kept (stripped) in region_name rather than dropped silently.
+    org_rows["region_name"] = [
+        pair[1] or (str(raw).strip() if pd.notna(raw) else None)
+        for pair, raw in zip(regions, raw_region)
+    ]
+    org_rows["org_type"] = "trust"
+    upsert_organisations(conn, org_rows, ["org_name", "region_name", "region_code"])
+
+
+def etl_rtt_waits(db_path: str = "data/processed/nhs.duckdb", force: bool = False):
     """ETL pipeline for RTT waiting times."""
     conn = get_connection(db_path)
     try:
         ensure_schema_exists(conn)
-
-        xlsx_files = sorted(Path("data/raw").glob("rtt_incomplete_provider_*.xlsx"))
-        if not xlsx_files:
-            print("⚠ Skipping RTT: No rtt_incomplete_provider_*.xlsx files found in data/raw/")
-            return
-
-        for xlsx_path in xlsx_files:
-            print(f"Loading RTT waiting times: {xlsx_path.name}...")
-            df = load_rtt_waits(str(xlsx_path))
-            if df.empty:
-                continue
-
-            # Upsert into fact table (clear old data first for idempotency)
-            # Every month present, not just the first: a file covering more than one
-            # month would otherwise leave the later months in place and duplicate them
-            # on re-run. Same loop as etl/dental_uda.py.
-            for month_date in df["month_date"].unique():
-                conn.execute(
-                    "DELETE FROM fact_rtt_waits WHERE month_date = ?",
-                    [month_date]
-                )
-
-            conn.execute("""
-                INSERT INTO fact_rtt_waits
-                SELECT * FROM df
-            """)
-
-            # Update dim_organisation with providers from this dataset
-            org_rows = df[["org_code", "org_name", "region_code"]].drop_duplicates()
-            org_rows["org_type"] = "trust"
-            org_rows["parent_org_code"] = None
-            org_rows = org_rows.rename(columns={"region_code": "region_name"})
-
-            conn.execute("""
-                INSERT INTO dim_organisation (org_code, org_name, org_type, parent_org_code, region_name)
-                SELECT org_code, org_name, org_type, parent_org_code, region_name FROM org_rows
-                ON CONFLICT (org_code) DO UPDATE SET
-                    org_name = EXCLUDED.org_name,
-                    org_type = EXCLUDED.org_type,
-                    region_name = EXCLUDED.region_name
-            """)
-
-            print(f"[OK] Loaded RTT ({xlsx_path.name}): {len(df)} rows into fact_rtt_waits")
-
+        run = ingest_files(
+            conn, dataset="rtt_waits",
+            paths=sorted(Path("data/raw").glob("rtt_incomplete_provider_*.xlsx")),
+            load_fn=load_rtt_waits, write_fn=_write_rtt, force=force,
+        )
+        return run
     finally:
         conn.close()
 

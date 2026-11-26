@@ -10,7 +10,17 @@ from datetime import datetime
 
 import pandas as pd
 
-from etl.common import ensure_schema_exists, get_connection  # noqa: E402 — after the sys.path shim above
+from etl.common import (  # noqa: E402 — after the sys.path shim above
+    ensure_schema_exists,
+    get_connection,
+    ingest_files,
+    map_unique,
+    normalise_region,
+    replace_months,
+    safe_pct,
+    to_int_series,
+    upsert_organisations,
+)
 
 
 def parse_ae_period(period_str: str) -> datetime:
@@ -57,31 +67,27 @@ def load_ae_attendances(csv_path: str = "data/raw/ae_attendances_202403.csv"):
     df = df[~is_total].copy()
 
     # Parse month date from Period column
-    df["month_date"] = df["Period"].apply(parse_ae_period)
+    df["month_date"] = map_unique(df["Period"], parse_ae_period)
 
 
     # Clean and cast attendance columns
-    df["attendances_type1"] = df["A&E attendances Type 1"].apply(clean_ae_value)
-    df["attendances_type2"] = df["A&E attendances Type 2"].apply(clean_ae_value)
-    df["attendances_other"] = df["A&E attendances Other A&E Department"].apply(clean_ae_value)
+    df["attendances_type1"] = to_int_series(df["A&E attendances Type 1"])
+    df["attendances_type2"] = to_int_series(df["A&E attendances Type 2"])
+    df["attendances_other"] = to_int_series(df["A&E attendances Other A&E Department"])
 
     # Derived: total attendances
     df["total_attendances"] = df["attendances_type1"] + df["attendances_type2"] + df["attendances_other"]
 
     # Clean and cast breach columns
-    df["breaches_4hr_type1"] = df["Attendances over 4hrs Type 1"].apply(clean_ae_value)
-    df["breaches_4hr_type2"] = df["Attendances over 4hrs Type 2"].apply(clean_ae_value)
-    df["breaches_4hr_other"] = df["Attendances over 4hrs Other Department"].apply(clean_ae_value)
+    df["breaches_4hr_type1"] = to_int_series(df["Attendances over 4hrs Type 1"])
+    df["breaches_4hr_type2"] = to_int_series(df["Attendances over 4hrs Type 2"])
+    df["breaches_4hr_other"] = to_int_series(df["Attendances over 4hrs Other Department"])
 
     # Derived: total breaches
     df["total_breaches_4hr"] = df["breaches_4hr_type1"] + df["breaches_4hr_type2"] + df["breaches_4hr_other"]
 
     # Derived: breach percentage (avoid division by zero)
-    df["breach_pct"] = df.apply(
-        lambda row: (row["total_breaches_4hr"] / row["total_attendances"] * 100.0)
-        if row["total_attendances"] > 0 else 0.0,
-        axis=1
-    )
+    df["breach_pct"] = safe_pct(df["total_breaches_4hr"], df["total_attendances"])
 
     # Admissions via A&E (sum of Type 1, Type 2, Other)
     ae_type1_col = "Emergency admissions via A&E - Type 1"
@@ -90,11 +96,11 @@ def load_ae_attendances(csv_path: str = "data/raw/ae_attendances_202403.csv"):
 
     admissions_sum = pd.Series(0, index=df.index)
     if ae_type1_col in df.columns:
-        admissions_sum = admissions_sum + df[ae_type1_col].apply(clean_ae_value)
+        admissions_sum = admissions_sum + to_int_series(df[ae_type1_col])
     if ae_type2_col in df.columns:
-        admissions_sum = admissions_sum + df[ae_type2_col].apply(clean_ae_value)
+        admissions_sum = admissions_sum + to_int_series(df[ae_type2_col])
     if ae_other_col in df.columns:
-        admissions_sum = admissions_sum + df[ae_other_col].apply(clean_ae_value)
+        admissions_sum = admissions_sum + to_int_series(df[ae_other_col])
     df["admissions_via_ae"] = admissions_sum
 
     # Select required columns
@@ -118,54 +124,32 @@ def load_ae_attendances(csv_path: str = "data/raw/ae_attendances_202403.csv"):
     return result
 
 
-def etl_ae_attendances(db_path: str = "data/processed/nhs.duckdb"):
+def _write_ae(conn, df):
+    replace_months(conn, "fact_ae_attendances", df)
+
+    # Update dim_organisation with trusts from this dataset
+    org_rows = df[["org_code", "org_name", "parent_org"]].drop_duplicates("org_code", keep="last").copy()
+    regions = org_rows["parent_org"].map(normalise_region)
+    org_rows["region_code"] = regions.map(lambda pair: pair[0])
+    # Unrecognised labels are kept (stripped) rather than dropped, so nothing is lost silently.
+    org_rows["region_name"] = [
+        pair[1] or (str(raw).strip() if pd.notna(raw) else None)
+        for pair, raw in zip(regions, org_rows["parent_org"])
+    ]
+    org_rows["org_type"] = "trust"
+    upsert_organisations(conn, org_rows, ["org_name", "region_name", "region_code"])
+
+
+def etl_ae_attendances(db_path: str = "data/processed/nhs.duckdb", force: bool = False):
     """ETL pipeline for A&E attendances."""
     conn = get_connection(db_path)
     try:
         ensure_schema_exists(conn)
-
-        csv_files = sorted(Path("data/raw").glob("ae_attendances_*.csv"))
-        if not csv_files:
-            print("⚠ Skipping A&E: No ae_attendances_*.csv files found in data/raw/")
-            return
-
-        for csv_path in csv_files:
-            print(f"Loading A&E attendances: {csv_path.name}...")
-            df = load_ae_attendances(str(csv_path))
-            if df.empty:
-                continue
-
-            # Upsert into fact table (clear old data first for idempotency)
-            # Every month present, not just the first: a file covering more than one
-            # month would otherwise leave the later months in place and duplicate them
-            # on re-run. Same loop as etl/dental_uda.py.
-            for month_date in df["month_date"].unique():
-                conn.execute(
-                    "DELETE FROM fact_ae_attendances WHERE month_date = ?",
-                    [month_date]
-                )
-
-            conn.execute("""
-                INSERT INTO fact_ae_attendances
-                SELECT * FROM df
-            """)
-
-            # Update dim_organisation with trusts from this dataset
-            org_rows = df[["org_code", "org_name", "parent_org"]].drop_duplicates()
-            org_rows = org_rows.rename(columns={"parent_org": "region_name"})
-            org_rows["org_type"] = "trust"
-            org_rows["parent_org_code"] = None
-
-            conn.execute("""
-                INSERT INTO dim_organisation (org_code, org_name, org_type, parent_org_code, region_name)
-                SELECT org_code, org_name, org_type, parent_org_code, region_name FROM org_rows
-                ON CONFLICT (org_code) DO UPDATE SET
-                    org_name = EXCLUDED.org_name,
-                    org_type = EXCLUDED.org_type,
-                    region_name = EXCLUDED.region_name
-            """)
-
-            print(f"[OK] Loaded A&E ({csv_path.name}): {len(df)} rows into fact_ae_attendances")
+        run = ingest_files(
+            conn, dataset="ae_attendances",
+            paths=sorted(Path("data/raw").glob("ae_attendances_*.csv")),
+            load_fn=load_ae_attendances, write_fn=_write_ae, force=force,
+        )
 
         # Flag trusts with zero attendances across every month they have data
         # for — specialist/non-emergency trusts (orthopaedic-only, oncology-only,
@@ -192,7 +176,7 @@ def etl_ae_attendances(db_path: str = "data/processed/nhs.duckdb"):
                 HAVING SUM(total_attendances) > 0
             )
         """)
-
+        return run
     finally:
         conn.close()
 

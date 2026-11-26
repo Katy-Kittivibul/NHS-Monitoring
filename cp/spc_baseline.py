@@ -1,4 +1,9 @@
-"""Stage 2 Part A — NHS basic SPC rules on A&E breach_pct, per trust.
+"""Stage 2 Part A — NHS basic SPC rules per trust, on A&E breach_pct (and RTT % over 18 weeks).
+
+run_spc_baseline() takes a dataset and a `peer` flag: peer=False monitors the trust's own
+series, peer=True the trust minus the national weighted value for the month (see
+cp/signals.get_series). Limits are estimated per series, so each dataset and each trust has
+its own centre line and sigma; nothing is shared between A&E and RTT.
 
 Uses an XmR (Individuals / Moving Range) chart, the standard NHS SPC
 methodology for month-on-month metrics like this: the centre line is the
@@ -17,13 +22,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 
 from cp.signals import (
+    MIN_MONTHLY_VOLUME,
     ensure_cp_schema_exists,
-    get_ae_breach_pct_series,
     get_connection,
+    get_series,
+    series_dataset,
     write_signals,
 )
 
-DATASET = "ae_attendances"
 METHOD_RULE1 = "spc_rule1_3sigma"
 METHOD_RULE2 = "spc_rule2_run7"
 
@@ -74,18 +80,21 @@ def rule2_run_of_7(dates, values, mean) -> list[tuple]:
     return signals
 
 
-def run_spc_baseline(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
-    """Run both SPC rules for every trust and write signals to cp_signals."""
+def run_spc_baseline(db_path: str = "data/processed/nhs.duckdb", dataset: str = "ae_attendances",
+                     peer: bool = False) -> list[dict]:
+    """Run both SPC rules for every monitored trust and write signals to cp_signals."""
     conn = get_connection(db_path)
     try:
         ensure_cp_schema_exists(conn)
-        df = get_ae_breach_pct_series(conn)
+        df = get_series(conn, dataset, peer)
+        out_dataset = series_dataset(dataset, peer)
+        floor_note = f", min_monthly_volume={MIN_MONTHLY_VOLUME[dataset]}"
 
         rule1_signals, rule2_signals = [], []
         for org_code, g in df.groupby("org_code"):
             g = g.sort_values("month_date")
             dates = g["month_date"].tolist()
-            values = g["breach_pct"].to_numpy(dtype=float)
+            values = g["value"].to_numpy(dtype=float)
             if len(values) < MIN_POINTS:
                 continue
 
@@ -93,19 +102,19 @@ def run_spc_baseline(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
 
             for date, signal_type, detail in rule1_beyond_3sigma(dates, values, mean, lcl, ucl):
                 rule1_signals.append({
-                    "dataset": DATASET, "org_code": org_code, "month_date": date,
-                    "method": METHOD_RULE1, "signal_type": signal_type, "detail": detail,
+                    "dataset": out_dataset, "org_code": org_code, "month_date": date,
+                    "method": METHOD_RULE1, "signal_type": signal_type, "detail": detail + floor_note,
                 })
             for date, signal_type, detail in rule2_run_of_7(dates, values, mean):
                 rule2_signals.append({
-                    "dataset": DATASET, "org_code": org_code, "month_date": date,
-                    "method": METHOD_RULE2, "signal_type": signal_type, "detail": detail,
+                    "dataset": out_dataset, "org_code": org_code, "month_date": date,
+                    "method": METHOD_RULE2, "signal_type": signal_type, "detail": detail + floor_note,
                 })
 
-        write_signals(conn, DATASET, METHOD_RULE1, rule1_signals)
-        write_signals(conn, DATASET, METHOD_RULE2, rule2_signals)
+        write_signals(conn, out_dataset, METHOD_RULE1, rule1_signals)
+        write_signals(conn, out_dataset, METHOD_RULE2, rule2_signals)
 
-        print(f"[OK] SPC baseline complete: {len(rule1_signals)} rule-1 signals, "
+        print(f"[OK] SPC baseline ({out_dataset}): {len(rule1_signals)} rule-1 signals, "
               f"{len(rule2_signals)} rule-2 signals")
         return rule1_signals + rule2_signals
     finally:
