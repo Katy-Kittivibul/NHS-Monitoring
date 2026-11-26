@@ -1,4 +1,5 @@
 -- Purpose: trust x month x treatment function RTT performance from specialty rows only (C_999 total excluded), for specialty drill-down.
+-- Grain: one row per org_code x month_date x specialty_code.
 -- Note: Never add this view to vw_rtt_performance: both describe the same pathways.
 DROP VIEW IF EXISTS reporting.vw_rtt_specialty CASCADE;
 CREATE VIEW reporting.vw_rtt_specialty AS

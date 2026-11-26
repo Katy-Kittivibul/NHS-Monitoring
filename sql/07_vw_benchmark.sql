@@ -1,4 +1,5 @@
 -- Purpose: each active NHS trust against its region and England per month for A&E 4-hour (all types and Type 1) and RTT 18-week performance, with regional and national ranks.
+-- Grain: one row per measure x org_code x month_date.
 -- Note: region_pct and national_pct are weighted (sum of numerators / sum of denominators) over ALL providers reporting that month, so national equals the vw_ae_performance / vw_rtt_performance totals; rows are active NHS trusts only, ranks (1 = best) exclude region 'Unknown', and A&E ranks (all types and Type 1) are given only to trusts with Type 1 A&E (has_type1_ae), so Type 3-only units are not ranked against full emergency departments.
 DROP VIEW IF EXISTS reporting.vw_benchmark CASCADE;
 CREATE VIEW reporting.vw_benchmark AS

@@ -1,5 +1,6 @@
 -- Purpose: one row per trust/provider with region, ICB, reporting span and active flag, as the organisation dimension for all trust-level views.
--- Note: Membership is by reporting in the A&E or RTT facts (not dim_organisation.org_type, which the prescribing load overwrote to 'practice' for 5 A&E walk-in centres); ICB comes from reporting.trust_icb_current (RE8 partner ICB in force in the trust's last reporting month); Unmapped and Multiple ICBs are labelled, never dropped.
+-- Grain: one row per org_code that reports A&E or RTT.
+-- Note: Membership is by reporting in the A&E or RTT facts (not dim_organisation.org_type: databases loaded before the org-type precedence fix had the prescribing load overwrite it to 'practice' for 5 A&E walk-in centres, and fact membership stays correct either way); ICB comes from reporting.trust_icb_current (RE8 partner ICB in force in the trust's last reporting month); Unmapped and Multiple ICBs are labelled, never dropped.
 DROP VIEW IF EXISTS reporting.vw_dim_trust CASCADE;
 CREATE VIEW reporting.vw_dim_trust AS
 WITH region_map (region_code, region_name, ae_label) AS (

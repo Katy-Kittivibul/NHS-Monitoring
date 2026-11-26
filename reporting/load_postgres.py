@@ -1,6 +1,7 @@
 """Copy the reporting tables from DuckDB into PostgreSQL (schema "reporting").
 
-Full refresh in a single transaction: each table is dropped, recreated with explicit
+Full refresh in a single transaction (the old schema stays readable until COMMIT, so no
+separate staging schema is needed): each table is dropped, recreated with explicit
 types and keys, and reloaded with COPY. Source and target row counts are compared
 before COMMIT; any mismatch raises and rolls the whole refresh back, so readers
 (e.g. Power BI) see either the old data or the new data, never a half-loaded schema.
@@ -28,11 +29,12 @@ REFERENCE_DIR = _ROOT / "corr" / "reference"
 TABLES = [
     {
         "name": "dim_organisation",
-        "source": "SELECT org_code, org_name, org_type, parent_org_code, region_name, specialist_no_ae "
-                  "FROM dim_organisation",
+        "source": "SELECT org_code, org_name, org_type, parent_org_code, region_name, specialist_no_ae, "
+                  "region_code FROM dim_organisation",
         "columns": [
             ("org_code", "text NOT NULL"), ("org_name", "text"), ("org_type", "text"),
             ("parent_org_code", "text"), ("region_name", "text"), ("specialist_no_ae", "boolean"),
+            ("region_code", "text"),
         ],
         "constraints": ["PRIMARY KEY (org_code)"],
         "indexes": [],
@@ -99,6 +101,108 @@ TABLES = [
         ],
         "constraints": ["PRIMARY KEY (dataset, org_code, month_date, method, signal_type)"],
         "indexes": [("org_code, month_date", "org_month")],
+    },
+    {
+        "name": "dim_sub_icb",
+        "source": "SELECT sub_icb_code, sub_icb_name, icb_code, icb_name FROM dim_sub_icb",
+        "columns": [
+            ("sub_icb_code", "text NOT NULL"), ("sub_icb_name", "text"),
+            ("icb_code", "text"), ("icb_name", "text"),
+        ],
+        "constraints": ["PRIMARY KEY (sub_icb_code)"],
+        "indexes": [("icb_code", "icb")],
+    },
+    {
+        # Loaded at its native grain: month x practice x BNF section x setting. That is ~80k
+        # rows for the one BNF section currently extracted (13 months); aggregate in DuckDB
+        # here if more sections are ever loaded. vw_primary_care_icb rolls it up to ICB.
+        "name": "fact_prescribing",
+        "source": "SELECT month_date, practice_code, practice_name, sub_icb_code, bnf_section_code, "
+                  "setting_code, items, quantity, actual_cost FROM fact_prescribing",
+        "columns": [
+            ("month_date", "date NOT NULL"), ("practice_code", "text NOT NULL"),
+            ("practice_name", "text"), ("sub_icb_code", "text"),
+            ("bnf_section_code", "text NOT NULL"), ("setting_code", "integer NOT NULL"),
+            ("items", "bigint"), ("quantity", "double precision"), ("actual_cost", "double precision"),
+        ],
+        "constraints": ["PRIMARY KEY (month_date, practice_code, bnf_section_code, setting_code)"],
+        "indexes": [("sub_icb_code, month_date", "subicb_month")],
+    },
+    {
+        # Grain: month x dental contract (~7.6k contracts, ~95k rows for 14 months).
+        "name": "fact_dental_uda",
+        "source": "SELECT month_date, icb_code, icb_name, contract_number, provider_name, uda_target, "
+                  "uda_delivered, band_1_delivered, band_2_delivered, band_3_delivered, "
+                  "band_urgent_delivered FROM fact_dental_uda",
+        "columns": [
+            ("month_date", "date NOT NULL"), ("icb_code", "text"), ("icb_name", "text"),
+            ("contract_number", "text NOT NULL"), ("provider_name", "text"),
+            ("uda_target", "double precision"), ("uda_delivered", "double precision"),
+            ("band_1_delivered", "double precision"), ("band_2_delivered", "double precision"),
+            ("band_3_delivered", "double precision"), ("band_urgent_delivered", "double precision"),
+        ],
+        "constraints": ["PRIMARY KEY (month_date, contract_number)"],
+        "indexes": [("icb_code, month_date", "icb_month")],
+    },
+    {
+        # Tier 1 (region) and Tier 2 (trust) rolling correlations. detail is "r=.., p=.., n=..".
+        "name": "corr_signals",
+        "optional": True,
+        "source": "SELECT tier, dataset_pair, geography_level, geography_code, month_date, "
+                  "correlation_metric, detail, p_value, n_obs, ci_low, ci_high, q_value, "
+                  "is_significant_fdr FROM corr_signals",
+        "columns": [
+            ("tier", "text NOT NULL"), ("dataset_pair", "text NOT NULL"),
+            ("geography_level", "text"), ("geography_code", "text NOT NULL"),
+            ("month_date", "date NOT NULL"), ("correlation_metric", "double precision"),
+            ("detail", "text"),
+            ("p_value", "double precision"), ("n_obs", "integer"), ("ci_low", "double precision"),
+            ("ci_high", "double precision"), ("q_value", "double precision"),
+            ("is_significant_fdr", "boolean"),
+        ],
+        "constraints": ["PRIMARY KEY (tier, dataset_pair, geography_code, month_date)"],
+        "indexes": [("geography_code, month_date", "geo_month")],
+    },
+    {
+        # Tier 3 question A (trust changepoint -> did its ICB's dental/prescribing correlate?).
+        "name": "corr_signals_tier3a",
+        "optional": True,
+        "source": "SELECT trust_code, icb_code, month_date, finding, detail, p_value, n_obs, ci_low, "
+                  "ci_high, q_value, is_significant_fdr FROM corr_signals_tier3a",
+        "columns": [
+            ("trust_code", "text NOT NULL"), ("icb_code", "text NOT NULL"), ("month_date", "date NOT NULL"),
+            ("finding", "text NOT NULL"), ("detail", "text"),
+            ("p_value", "double precision"), ("n_obs", "integer"), ("ci_low", "double precision"),
+            ("ci_high", "double precision"), ("q_value", "double precision"),
+            ("is_significant_fdr", "boolean"),
+        ],
+        "constraints": ["PRIMARY KEY (trust_code, icb_code, month_date, finding)"],
+        "indexes": [("trust_code", "trust")],
+    },
+    {
+        # Tier 3 question B (flat trust -> did its ICB's dental/prescribing shift anyway?).
+        "name": "corr_signals_tier3b",
+        "optional": True,
+        "source": "SELECT trust_code, icb_code, month_date, finding, detail FROM corr_signals_tier3b",
+        "columns": [
+            ("trust_code", "text NOT NULL"), ("icb_code", "text NOT NULL"), ("month_date", "date NOT NULL"),
+            ("finding", "text NOT NULL"), ("detail", "text"),
+        ],
+        "constraints": ["PRIMARY KEY (trust_code, icb_code, month_date, finding)"],
+        "indexes": [("trust_code", "trust")],
+    },
+    {
+        "name": "pipeline_runs",
+        "optional": True,
+        "source": "SELECT run_id, stage, dataset, started_at, finished_at, status, rows_processed, detail "
+                  "FROM pipeline_runs",
+        "columns": [
+            ("run_id", "text NOT NULL"), ("stage", "text NOT NULL"), ("dataset", "text"),
+            ("started_at", "timestamp"), ("finished_at", "timestamp"), ("status", "text"),
+            ("rows_processed", "bigint"), ("detail", "text"),
+        ],
+        "constraints": ["PRIMARY KEY (run_id)"],
+        "indexes": [("stage, dataset", "stage_dataset")],
     },
 ]
 
@@ -190,6 +294,11 @@ def _export_csv(con, select_sql: str, out_path: Path) -> int:
     return con.execute(f"SELECT COUNT(*) FROM ({select_sql})").fetchone()[0]
 
 
+def _source_has_table(con, name: str) -> bool:
+    return bool(con.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?", [name]).fetchone()[0])
+
+
 def _copy_in(cur, spec: dict, csv_path: Path):
     cols = ", ".join(name for name, _ in spec["columns"])
     with open(csv_path, encoding="utf-8", newline="") as fh:
@@ -233,7 +342,13 @@ def load_reporting(db_path: str = "data/processed/nhs.duckdb", settings: dict | 
                 else:
                     select = spec["source"]
                 out = Path(tmp) / f"{name}.csv"
-                src_count = _export_csv(src, select, out)
+                if spec.get("optional") and not _source_has_table(src, name):
+                    # e.g. Tier 3 has not been run yet: publish the table empty, not a failed refresh.
+                    out.write_text("", encoding="utf-8")
+                    src_count = 0
+                    print(f"[NOTE] {name} is not in the DuckDB file yet; loading it empty")
+                else:
+                    src_count = _export_csv(src, select, out)
 
                 # CASCADE drops the sql/ views that depend on the table; they are rebuilt below.
                 cur.execute(f"DROP TABLE IF EXISTS {SCHEMA}.{name} CASCADE")

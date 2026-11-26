@@ -1,29 +1,21 @@
--- Purpose: trust x month A&E 4-hour performance (all types headline, Type 1 reported separately) against the national target, with 3-month rolling and year-on-year comparison.
--- Sources: Target by financial year, applied to every month of that year (the guidance sets it "by/in March"); the constitutional standard is 95% throughout.
---   FY2023/24 76%: NHS England, "Delivery plan for recovering urgent and emergency care services" (Jan 2023): "76% performance in A&E wait times, measured through the 4-hour target" - https://www.england.nhs.uk/long-read/delivery-plan-for-recovering-urgent-and-emergency-care-services/
---   FY2024/25 78%: NHS England, "2024/25 priorities and operational planning guidance": "a minimum of 78% of patients seen within 4 hours in March 2025" - https://www.england.nhs.uk/long-read/2024-25-priorities-and-operational-planning-guidance/
---   FY2025/26 78%: NHS England, "Urgent and emergency care plan 2025/26": "a minimum of 78% of patients who attend A&E ... admitted, transferred or discharged within 4 hours" - https://www.england.nhs.uk/long-read/urgent-and-emergency-care-plan-2025-26/
---   FY2026/27 82%: NHS England, "Medium Term Planning Framework 2026/27 to 2028/29": "Every trust to maintain or improve to 82% by March 2027" - https://www.england.nhs.uk/long-read/medium-term-planning-framework-delivering-change-together-2026-27-to-2028-29/
+-- Purpose: trust x month A&E 4-hour performance (all types headline, Type 1 reported separately) against the national target (reporting.vw_ae_targets), with 3-month rolling and year-on-year comparison, plus admissions and the breaches above the target allowance.
+-- Grain: one row per org_code x month_date.
+-- Note: excess_breaches_vs_target = breaches above the number the target allows (never negative; 0 when the trust met the target). admission_conversion_pct = admissions via A&E as a share of all attendances.
 DROP VIEW IF EXISTS reporting.vw_ae_performance CASCADE;
 CREATE VIEW reporting.vw_ae_performance AS
-WITH standards (fy_start_year, target_pct) AS (
-    VALUES (2023, 76.0), (2024, 78.0), (2025, 78.0), (2026, 82.0)
-),
-base AS (
+WITH base AS (
     SELECT org_code,
            month_date,
            total_attendances                          AS attendances,
            total_breaches_4hr                         AS breaches_4hr,
            total_attendances - total_breaches_4hr     AS within_4hr,
+           admissions_via_ae                          AS admissions,
            attendances_type1                          AS type1_attendances,
            breaches_4hr_type1                         AS type1_breaches_4hr,
            CASE WHEN attendances_type1 > 0
                 THEN 100.0 * (attendances_type1 - breaches_4hr_type1) / attendances_type1 END AS type1_performance_pct,
            CASE WHEN total_attendances > 0
-                THEN 100.0 * (total_attendances - total_breaches_4hr) / total_attendances END AS performance_pct,
-           CASE WHEN EXTRACT(MONTH FROM month_date) >= 4
-                THEN EXTRACT(YEAR FROM month_date)::int
-                ELSE EXTRACT(YEAR FROM month_date)::int - 1 END AS fy_start_year
+                THEN 100.0 * (total_attendances - total_breaches_4hr) / total_attendances END AS performance_pct
     FROM reporting.fact_ae_attendances
 ),
 rolling AS (
@@ -44,6 +36,10 @@ SELECT
     r.performance_pct,
     s.target_pct                                       AS national_target_pct,
     95.0                                               AS constitutional_standard_pct,
+    GREATEST(r.breaches_4hr - r.attendances * (1 - s.target_pct / 100.0), 0) AS excess_breaches_vs_target,
+    r.admissions,
+    CASE WHEN r.attendances > 0
+         THEN 100.0 * r.admissions / r.attendances END AS admission_conversion_pct,
     (r.performance_pct >= s.target_pct)                AS met_target,
     (r.performance_pct >= 95.0)                        AS met_constitutional_standard,
     CASE WHEN r.w_months = 3 AND r.w_attendances > 0
@@ -55,6 +51,6 @@ SELECT
     r.type1_breaches_4hr,
     r.type1_performance_pct
 FROM rolling r
-LEFT JOIN standards s ON s.fy_start_year = r.fy_start_year
+LEFT JOIN reporting.vw_ae_targets s ON r.month_date BETWEEN s.valid_from AND s.valid_to
 LEFT JOIN base p ON p.org_code = r.org_code
                 AND p.month_date = (r.month_date - INTERVAL '1 year')::date;

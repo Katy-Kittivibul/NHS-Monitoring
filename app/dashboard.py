@@ -116,6 +116,26 @@ def load_tier3a_national_summary():
     return q.get_tier3a_national_summary(get_db_connection())
 
 
+@st.cache_data(ttl=60)
+def load_national_monthly_summary():
+    return q.get_national_monthly_summary(get_db_connection())
+
+
+@st.cache_data(ttl=60)
+def load_trust_benchmark_league(month_date=None):
+    return q.get_trust_benchmark_league(get_db_connection(), month_date)
+
+
+@st.cache_data(ttl=60)
+def load_regional_summary(month_date=None):
+    return q.get_regional_summary(get_db_connection(), month_date)
+
+
+@st.cache_data(ttl=60)
+def load_rtt_specialty_backlog(month_date=None):
+    return q.get_rtt_specialty_backlog(get_db_connection(), month_date)
+
+
 # ==============================================================================
 # SHARED SIDEBAR — trust selector + glossary (rendered on every page)
 # ==============================================================================
@@ -162,6 +182,274 @@ with st.sidebar.expander("📖 Glossary & Acronyms", expanded=False):
     *   **🔄 Run of 7**: Statistical Process Control (XmR Rule 2) — 7 consecutive months falling on the same
         side of the mean.
     """)
+
+
+# ==============================================================================
+# PAGE 0: EXECUTIVE OVERVIEW (NATIONAL, REGIONAL & SPECIALTY STORYTELLING)
+# ==============================================================================
+def page_executive_overview():
+    st.title("📊 Executive Overview: NHS Secondary Care Capacity & Performance")
+    st.markdown(
+        "National and regional operational summary quantifying emergency department (A&E) breach "
+        "volumes against NHS planning targets, elective waiting list (RTT) specialty bottlenecks, "
+        "and emergency admission bed-block dynamics."
+    )
+
+    df_nat = safe_load(load_national_monthly_summary, context="national monthly summary")
+    if df_nat.empty:
+        st.info("No fact table data found — run `python etl/run_all.py` to load A&E and RTT extracts.")
+        return
+
+    df_nat = df_nat.sort_values("month_date").reset_index(drop=True)
+    months_desc = sorted(df_nat["month_date"].dropna().unique(), reverse=True)
+
+    col_sel, col_note = st.columns([1, 3])
+    with col_sel:
+        selected_month = st.selectbox(
+            "Reporting Month:",
+            options=months_desc,
+            index=0,
+            format_func=lambda d: pd.Timestamp(d).strftime("%B %Y"),
+        )
+    with col_note:
+        st.caption(
+            "All regional and national percentages are volume-weighted (`SUM(within) / SUM(total)`). "
+            "RTT totals use provider `C_999` rows exclusively; specialty charts exclude `C_999` to "
+            "prevent double counting."
+        )
+
+    cur_rows = df_nat[df_nat["month_date"] == selected_month]
+    cur = cur_rows.iloc[0]
+    cur_idx = cur_rows.index[0]
+    prev = df_nat.iloc[cur_idx - 1] if cur_idx > 0 else None
+
+    # --- Headline KPI Scorecards ---
+    k1, k2, k3, k4, k5 = st.columns(5)
+
+    ae_pct = cur["ae_4hr_pct"]
+    ae_target = cur["ae_target_pct"]
+    k1.metric(
+        "A&E Within 4 Hours",
+        f"{ae_pct:.1f}%" if pd.notna(ae_pct) else "N/A",
+        delta=(
+            f"{ae_pct - ae_target:+.1f} pp vs {ae_target:.0f}% target"
+            if pd.notna(ae_pct) and pd.notna(ae_target) else None
+        ),
+    )
+
+    t1_pct = cur["ae_type1_4hr_pct"]
+    prev_t1 = prev["ae_type1_4hr_pct"] if prev is not None else np.nan
+    k2.metric(
+        "Type 1 Major A&E 4hr %",
+        f"{t1_pct:.1f}%" if pd.notna(t1_pct) else "N/A",
+        delta=(
+            f"{t1_pct - prev_t1:+.1f} pp MoM"
+            if pd.notna(t1_pct) and pd.notna(prev_t1) else None
+        ),
+    )
+
+    excess = cur["excess_breaches_vs_target"]
+    prev_excess = prev["excess_breaches_vs_target"] if prev is not None else np.nan
+    k3.metric(
+        f"Excess Breaches (>{100 - ae_target:.0f}%)",
+        f"{int(excess):,}" if pd.notna(excess) else "N/A",
+        delta=(
+            f"{int(excess - prev_excess):+,} MoM"
+            if pd.notna(excess) and pd.notna(prev_excess) else None
+        ),
+        delta_color="inverse",
+    )
+
+    rtt_pct = cur["rtt_18wk_pct"]
+    k4.metric(
+        "RTT Within 18 Weeks",
+        f"{rtt_pct:.1f}%" if pd.notna(rtt_pct) else "N/A",
+        delta=f"{rtt_pct - 92.0:+.1f} pp vs 92% std" if pd.notna(rtt_pct) else None,
+    )
+
+    w52 = cur["over_52wk_count"]
+    prev_w52 = prev["over_52wk_count"] if prev is not None else np.nan
+    k5.metric(
+        "RTT 52+ Week Waiters",
+        f"{int(w52):,}" if pd.notna(w52) else "N/A",
+        delta=(
+            f"{int(w52 - prev_w52):+,} MoM"
+            if pd.notna(w52) and pd.notna(prev_w52) else None
+        ),
+        delta_color="inverse",
+    )
+
+    st.markdown("---")
+
+    # --- Row 1: National Trajectory + Regional Benchmark ---
+    c_left, c_right = st.columns(2)
+
+    with c_left:
+        fig_nat = go.Figure()
+        fig_nat.add_trace(go.Scatter(
+            x=df_nat["month_date"], y=df_nat["ae_4hr_pct"],
+            mode="lines+markers", name="A&E Within 4hr % (All Types)",
+            line=dict(color="#005EB8", width=3),
+        ))
+        fig_nat.add_trace(go.Scatter(
+            x=df_nat["month_date"], y=df_nat["ae_type1_4hr_pct"],
+            mode="lines+markers", name="A&E Within 4hr % (Type 1 Major)",
+            line=dict(color="#41B6E6", width=2, dash="dot"),
+        ))
+        fig_nat.add_trace(go.Scatter(
+            x=df_nat["month_date"], y=df_nat["ae_target_pct"],
+            mode="lines", name="NHS A&E Operational Target %",
+            line=dict(color="#DA291C", width=1.5, dash="dash"),
+        ))
+        if df_nat["rtt_18wk_pct"].notna().any():
+            fig_nat.add_trace(go.Scatter(
+                x=df_nat["month_date"], y=df_nat["rtt_18wk_pct"],
+                mode="lines+markers", name="RTT Within 18wk %",
+                line=dict(color="#ED8B00", width=2.5),
+            ))
+        fig_nat.update_layout(
+            title="England Monthly Performance vs Operational Target",
+            xaxis_title="Month",
+            yaxis_title="% Seen / Treated Within Standard",
+            height=410,
+            hovermode="x unified",
+            legend=dict(orientation="h", y=-0.22),
+        )
+        st.plotly_chart(fig_nat, use_container_width=True)
+
+    with c_right:
+        df_reg = safe_load(load_regional_summary, selected_month, context="regional benchmark")
+        if df_reg.empty:
+            st.info("No regional benchmark rows available for the selected month.")
+        else:
+            fig_reg = go.Figure()
+            fig_reg.add_trace(go.Bar(
+                y=df_reg["region_name"], x=df_reg["ae_4hr_pct"],
+                name="A&E Within 4hr %", orientation="h", marker_color="#005EB8",
+            ))
+            fig_reg.add_trace(go.Bar(
+                y=df_reg["region_name"], x=df_reg["rtt_18wk_pct"],
+                name="RTT Within 18wk %", orientation="h", marker_color="#ED8B00",
+            ))
+            fig_reg.update_layout(
+                title=f"Weighted Regional Performance ({pd.Timestamp(selected_month).strftime('%b %Y')})",
+                xaxis_title="% Within Standard",
+                yaxis_title=None,
+                barmode="group",
+                height=410,
+                legend=dict(orientation="h", y=-0.22),
+            )
+            st.plotly_chart(fig_reg, use_container_width=True)
+
+    # --- Row 2: Specialty Backlog Pareto + Admission Conversion Scatter ---
+    c_spec, c_conv = st.columns(2)
+
+    with c_spec:
+        df_spec = safe_load(load_rtt_specialty_backlog, selected_month, context="RTT specialty backlog")
+        if df_spec.empty:
+            st.info("No RTT specialty rows found for the selected month.")
+        else:
+            top_spec = df_spec.head(12).copy()
+            top_spec["cum_over18_share"] = top_spec["share_of_over18wk_pct"].cumsum()
+            fig_spec = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_spec.add_trace(
+                go.Bar(
+                    x=top_spec["specialty_name"],
+                    y=top_spec["over_18wk_count"],
+                    name="18wk+ Backlog Pathways",
+                    marker_color="#003087",
+                ),
+                secondary_y=False,
+            )
+            fig_spec.add_trace(
+                go.Scatter(
+                    x=top_spec["specialty_name"],
+                    y=top_spec["cum_over18_share"],
+                    mode="lines+markers",
+                    name="Cumulative % of All 18wk+ Waits",
+                    line=dict(color="#DA291C", width=2.5),
+                ),
+                secondary_y=True,
+            )
+            fig_spec.update_layout(
+                title="RTT Elective Backlog Pareto (Top 12 Specialties)",
+                height=430,
+                hovermode="x unified",
+                legend=dict(orientation="h", y=-0.32),
+                xaxis_tickangle=-30,
+            )
+            fig_spec.update_yaxes(title_text="18wk+ Pathways", secondary_y=False)
+            fig_spec.update_yaxes(title_text="Cumulative Share (%)", range=[0, 105], secondary_y=True)
+            st.plotly_chart(fig_spec, use_container_width=True)
+
+    df_league = safe_load(load_trust_benchmark_league, selected_month, context="trust league table")
+
+    with c_conv:
+        acute_scatter = df_league[
+            (df_league["provider_type"] == "NHS trust")
+            & df_league["has_type1_ae"]
+            & df_league["ae_4hr_pct"].notna()
+            & df_league["admission_conversion_pct"].notna()
+        ].copy()
+        if acute_scatter.empty:
+            st.info("Insufficient Type 1 acute trust rows for conversion analysis.")
+        else:
+            fig_sc = px.scatter(
+                acute_scatter,
+                x="admission_conversion_pct",
+                y="ae_4hr_pct",
+                size="attendances",
+                color="region_name",
+                hover_name="org_name",
+                hover_data=["org_code", "excess_breaches_vs_target", "active_signals"],
+                title="Emergency Admission Conversion % vs A&E 4hr % (Type 1 Trusts)",
+                labels={
+                    "admission_conversion_pct": "Emergency Admissions / Total Attendances (%)",
+                    "ae_4hr_pct": "A&E Within 4hr (%)",
+                    "region_name": "Region",
+                },
+            )
+            if selected_trust in acute_scatter["org_code"].values:
+                sel_row = acute_scatter[acute_scatter["org_code"] == selected_trust].iloc[0]
+                fig_sc.add_annotation(
+                    x=sel_row["admission_conversion_pct"],
+                    y=sel_row["ae_4hr_pct"],
+                    text=f"Selected: {selected_trust}",
+                    showarrow=True,
+                    arrowhead=2,
+                    font=dict(color="#DA291C", size=11),
+                )
+            fig_sc.update_layout(height=430, legend=dict(orientation="h", y=-0.32))
+            st.plotly_chart(fig_sc, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- Row 3: Interactive Trust Benchmark League Table ---
+    month_str = pd.Timestamp(selected_month).strftime("%B %Y")
+    st.subheader(f"Trust Operational Benchmark League Table ({month_str})")
+    if df_league.empty:
+        st.info("No trust benchmark data available.")
+        return
+
+    f_col1, f_col2 = st.columns(2)
+    with f_col1:
+        ptype_options = sorted(df_league["provider_type"].dropna().unique())
+        default_ptype = ["NHS trust"] if "NHS trust" in ptype_options else ptype_options
+        selected_ptypes = st.multiselect(
+            "Provider Type:", options=ptype_options, default=default_ptype
+        )
+    with f_col2:
+        reg_options = sorted(df_league["region_name"].dropna().unique())
+        selected_regs = st.multiselect(
+            "NHS Region:", options=reg_options, default=reg_options
+        )
+
+    filtered_league = df_league[
+        df_league["provider_type"].isin(selected_ptypes)
+        & df_league["region_name"].isin(selected_regs)
+    ].copy()
+
+    st.dataframe(filtered_league, use_container_width=True, hide_index=True)
 
 
 # ==============================================================================
@@ -652,6 +940,13 @@ def page_stage3():
 # the previous st.sidebar.radio + if/elif routing.
 # ==============================================================================
 pg = st.navigation([
+    st.Page(
+        page_executive_overview,
+        title="Executive Overview",
+        icon="📊",
+        url_path="overview",
+        default=True,
+    ),
     st.Page(page_stage1, title="Stage 1: Data Quality", icon="🛡️", url_path="stage1"),
     st.Page(page_stage2, title="Stage 2: Changepoints", icon="📈", url_path="stage2"),
     st.Page(page_stage3, title="Stage 3: Correlations", icon="🔗", url_path="stage3"),

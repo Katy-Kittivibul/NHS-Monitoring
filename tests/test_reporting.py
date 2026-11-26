@@ -47,3 +47,22 @@ def test_specs_are_consistent_with_their_sources(tmp_path):
         if has_org_month and spec["name"] != "dim_organisation":
             assert any(cols == "org_code, month_date" for cols, _ in spec["indexes"]), spec["name"]
         assert len(spec["columns"]) == len(spec["source"].split(" FROM ")[0].split("SELECT ")[1].split(", "))
+
+
+def test_every_published_table_has_a_unique_name_and_a_key():
+    names = [spec["name"] for spec in lp.TABLES + lp.CSV_TABLES]
+    assert len(names) == len(set(names))
+    for spec in lp.TABLES + lp.CSV_TABLES:
+        assert "PRIMARY KEY" in lp.create_table_sql(spec), spec["name"]
+
+
+def test_optional_tables_load_empty_when_the_stage_has_not_run():
+    """Tier 3 may not have been run yet: the refresh must not fail on its missing tables."""
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE present (x INTEGER)")
+    assert lp._source_has_table(con, "present")
+    assert not lp._source_has_table(con, "corr_signals_tier3a")
+    optional = {spec["name"] for spec in lp.TABLES if spec.get("optional")}
+    assert {"corr_signals", "corr_signals_tier3a", "corr_signals_tier3b", "pipeline_runs"} <= optional
+    # the core facts are required: a missing one is a real error, not an empty table
+    assert not {"fact_ae_attendances", "fact_rtt_waits", "fact_prescribing", "fact_dental_uda"} & optional

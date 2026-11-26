@@ -1,0 +1,428 @@
+// =============================================================================
+// NHS Monitoring Copilot — Production DAX Measure Library
+// Target Semantic Model: PostgreSQL `reporting` schema views (sql/00..12)
+//
+// Model Relationships (Single-direction 1 -> *):
+//   reporting.vw_dim_date[month_date]  1 ---> * reporting.vw_ae_performance[month_date]
+//   reporting.vw_dim_date[month_date]  1 ---> * reporting.vw_rtt_performance[month_date]
+//   reporting.vw_dim_date[month_date]  1 ---> * reporting.vw_rtt_specialty[month_date]
+//   reporting.vw_dim_date[month_date]  1 ---> * reporting.vw_spc_xmr[month_date]
+//   reporting.vw_dim_date[month_date]  1 ---> * reporting.vw_benchmark[month_date]
+//   reporting.vw_dim_date[month_date]  1 ---> * reporting.vw_data_quality[month_date]
+//   reporting.vw_dim_trust[org_code]   1 ---> * reporting.vw_ae_performance[org_code]
+//   reporting.vw_dim_trust[org_code]   1 ---> * reporting.vw_rtt_performance[org_code]
+//   reporting.vw_dim_trust[org_code]   1 ---> * reporting.vw_rtt_specialty[org_code]
+//   reporting.vw_dim_trust[org_code]   1 ---> * reporting.vw_spc_xmr[org_code]
+//   reporting.vw_dim_trust[org_code]   1 ---> * reporting.vw_benchmark[org_code]
+//
+// Design Principle:
+//   All ratio KPIs divide summed numerators by summed denominators so rollups
+//   from Trust -> ICB -> Region -> England are exact volume-weighted rates,
+//   never unweighted averages of precomputed percentages.
+// =============================================================================
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 01 A&E Performance
+// -----------------------------------------------------------------------------
+
+/// Total A&E attendances across Type 1, Type 2, and Type 3/UTC departments.
+/// Format: #,0
+Attendances =
+SUM ( vw_ae_performance[attendances] )
+
+/// Patients admitted, transferred, or discharged within 4 hours of arrival.
+/// Format: #,0
+Within 4hr Attendances =
+SUM ( vw_ae_performance[within_4hr] )
+
+/// Patients waiting longer than 4 hours in A&E (all department types).
+/// Format: #,0
+4hr Breaches =
+SUM ( vw_ae_performance[breaches_4hr] )
+
+/// Headline volume-weighted A&E 4-hour performance rate (0.0% - 100.0%).
+/// Format: 0.0%
+AE 4hr % =
+DIVIDE ( [Within 4hr Attendances], [Attendances] )
+
+/// Major consultant-led 24-hour emergency department attendances (Type 1).
+/// Format: #,0
+Type 1 Attendances =
+SUM ( vw_ae_performance[type1_attendances] )
+
+/// Volume-weighted 4-hour performance in Type 1 major A&E departments.
+/// Format: 0.0%
+AE Type 1 % =
+DIVIDE (
+    SUM ( vw_ae_performance[type1_attendances] )
+        - SUM ( vw_ae_performance[type1_breaches_4hr] ),
+    SUM ( vw_ae_performance[type1_attendances] )
+)
+
+/// Applicable NHS England annual operational planning standard (76% / 78% / 82%).
+/// Format: 0.0%
+AE Target % =
+DIVIDE ( MAX ( vw_ae_performance[national_target_pct] ), 100 )
+
+/// NHS Constitution statutory 4-hour standard (95.0%).
+/// Format: 0.0%
+AE Constitutional Standard % = 0.95
+
+/// Percentage-point gap vs the NHS operational planning target (positive = meeting/exceeding).
+/// Format: +0.0%;-0.0%;0.0%
+AE Variance vs Target =
+[AE 4hr %] - [AE Target %]
+
+/// Patient count of 4-hour breaches exceeding the allowed breach ceiling for the selected scope.
+/// Evaluated per trust-month via SUMX so surplus performance at one trust never hides excess at another.
+/// Format: #,0
+Excess 4hr Breaches vs Target =
+SUMX (
+    vw_ae_performance,
+    VAR AllowedBreaches =
+        ROUND (
+            vw_ae_performance[attendances]
+                * ( 1 - DIVIDE ( vw_ae_performance[national_target_pct], 100 ) ),
+            0
+        )
+    RETURN
+        MAX ( 0, vw_ae_performance[breaches_4hr] - AllowedBreaches )
+)
+
+/// England-wide weighted 4-hour rate, ignoring any Trust / ICB / Region slicer.
+/// Format: 0.0%
+AE National % =
+CALCULATE ( [AE 4hr %], REMOVEFILTERS ( vw_dim_trust ) )
+
+/// Weighted 4-hour rate for the selected trust's parent NHS England region.
+/// Format: 0.0%
+AE Region % =
+CALCULATE (
+    [AE 4hr %],
+    ALLEXCEPT ( vw_dim_trust, vw_dim_trust[region_code], vw_dim_trust[region_name] )
+)
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 02 Time Intelligence (Dynamic over vw_dim_date)
+// -----------------------------------------------------------------------------
+
+/// Dynamic 3-month rolling weighted A&E 4-hour % across Trust, ICB, Region, or England.
+/// Format: 0.0%
+AE 4hr % (Rolling 3M) =
+CALCULATE (
+    [AE 4hr %],
+    DATESINPERIOD (
+        vw_dim_date[month_date],
+        MAX ( vw_dim_date[month_date] ),
+        -3,
+        MONTH
+    )
+)
+
+/// Prior-year A&E 4-hour % for the same calendar month(s).
+/// Format: 0.0%
+AE 4hr % (PY) =
+CALCULATE ( [AE 4hr %], SAMEPERIODLASTYEAR ( vw_dim_date[month_date] ) )
+
+/// Year-on-year change in A&E 4-hour performance (percentage points).
+/// Format: +0.0%;-0.0%;0.0%
+AE 4hr YoY (pp) =
+VAR CurVal = [AE 4hr %]
+VAR PrevVal = [AE 4hr % (PY)]
+RETURN
+    IF ( NOT ISBLANK ( CurVal ) && NOT ISBLANK ( PrevVal ), CurVal - PrevVal )
+
+/// Month-on-month change in A&E 4-hour performance (percentage points).
+/// Format: +0.0%;-0.0%;0.0%
+AE 4hr MoM (pp) =
+VAR CurVal = [AE 4hr %]
+VAR PrevVal =
+    CALCULATE ( [AE 4hr %], DATEADD ( vw_dim_date[month_date], -1, MONTH ) )
+RETURN
+    IF ( NOT ISBLANK ( CurVal ) && NOT ISBLANK ( PrevVal ), CurVal - PrevVal )
+
+/// NHS Financial Year-to-Date (1 April start) weighted A&E 4-hour performance.
+/// Format: 0.0%
+AE 4hr % (FYTD) =
+CALCULATE (
+    [AE 4hr %],
+    DATESYTD ( vw_dim_date[month_date], "3/31" )
+)
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 03 RTT Elective Waiting Times (C_999 Provider Totals)
+// -----------------------------------------------------------------------------
+
+/// Total incomplete elective pathways (`vw_rtt_performance` uses C_999 totals only).
+/// Format: #,0
+Waiting List =
+SUM ( vw_rtt_performance[waiting_list_size] )
+
+/// Incomplete pathways waiting 18 weeks or fewer.
+/// Format: #,0
+Within 18wk Pathways =
+SUM ( vw_rtt_performance[within_18wk] )
+
+/// Incomplete pathways breaching the 18-week constitutional threshold.
+/// Format: #,0
+Over 18wk Backlog =
+SUM ( vw_rtt_performance[over_18wk] )
+
+/// Volume-weighted % of incomplete pathways within 18 weeks.
+/// Format: 0.0%
+RTT 18wk % =
+DIVIDE ( [Within 18wk Pathways], [Waiting List] )
+
+/// NHS Constitution 18-week RTT standard (92.0%).
+/// Format: 0.0%
+RTT Standard % = 0.92
+
+/// Dynamic 3-month rolling weighted RTT 18-week performance.
+/// Format: 0.0%
+RTT 18wk % (Rolling 3M) =
+CALCULATE (
+    [RTT 18wk %],
+    DATESINPERIOD (
+        vw_dim_date[month_date],
+        MAX ( vw_dim_date[month_date] ),
+        -3,
+        MONTH
+    )
+)
+
+/// Year-on-year change in RTT 18-week % (percentage points).
+/// Format: +0.0%;-0.0%;0.0%
+RTT 18wk YoY (pp) =
+VAR CurVal = [RTT 18wk %]
+VAR PrevVal =
+    CALCULATE ( [RTT 18wk %], SAMEPERIODLASTYEAR ( vw_dim_date[month_date] ) )
+RETURN
+    IF ( NOT ISBLANK ( CurVal ) && NOT ISBLANK ( PrevVal ), CurVal - PrevVal )
+
+/// Long-wait pathways exceeding 52 weeks (`vw_rtt_performance` C_999 only).
+/// Format: #,0
+Waiters 52wk+ =
+SUM ( vw_rtt_performance[waiters_52wk_plus] )
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 04 RTT Specialty Drill-Down (Excludes C_999)
+// -----------------------------------------------------------------------------
+
+/// Specialty-level incomplete pathways (`vw_rtt_specialty` excludes C_999; never add to [Waiting List]).
+/// Format: #,0
+Specialty Waiting List =
+SUM ( vw_rtt_specialty[waiting_list_size] )
+
+/// Specialty-level % within 18 weeks.
+/// Format: 0.0%
+Specialty RTT 18wk % =
+DIVIDE (
+    SUM ( vw_rtt_specialty[within_18wk] ),
+    SUM ( vw_rtt_specialty[waiting_list_size] )
+)
+
+/// Share of national/filtered 52+ week waiters contributed by the selected specialty.
+/// Format: 0.0%
+Specialty Share of 52wk+ % =
+DIVIDE (
+    SUM ( vw_rtt_specialty[waiters_52wk_plus] ),
+    CALCULATE (
+        SUM ( vw_rtt_specialty[waiters_52wk_plus] ),
+        ALLSELECTED ( vw_rtt_specialty[specialty_code], vw_rtt_specialty[specialty_name] )
+    )
+)
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 05 SPC Control Charts & Benchmarking
+// -----------------------------------------------------------------------------
+
+/// Observed single-trust XmR point (guarded by HASONEVALUE so multi-trust selections stay blank).
+/// Format: 0.0%
+SPC Value =
+IF (
+    HASONEVALUE ( vw_dim_trust[org_code] ),
+    DIVIDE ( AVERAGE ( vw_spc_xmr[value] ), 100 )
+)
+
+/// Single-trust XmR centre line (mean).
+/// Format: 0.0%
+SPC Mean =
+IF (
+    HASONEVALUE ( vw_dim_trust[org_code] ),
+    DIVIDE ( AVERAGE ( vw_spc_xmr[mean_value] ), 100 )
+)
+
+/// Single-trust XmR Upper Process Limit (mean + 2.66 * mR-bar, clipped at 100%).
+/// Format: 0.0%
+SPC Upper =
+IF (
+    HASONEVALUE ( vw_dim_trust[org_code] ),
+    DIVIDE ( AVERAGE ( vw_spc_xmr[upper_limit] ), 100 )
+)
+
+/// Single-trust XmR Lower Process Limit (mean - 2.66 * mR-bar, clipped at 0%).
+/// Format: 0.0%
+SPC Lower =
+IF (
+    HASONEVALUE ( vw_dim_trust[org_code] ),
+    DIVIDE ( AVERAGE ( vw_spc_xmr[lower_limit] ), 100 )
+)
+
+/// NHS Making Data Count variation badge for conditional formatting / KPI callouts.
+SPC Variation Status =
+IF (
+    NOT HASONEVALUE ( vw_dim_trust[org_code] ),
+    "Select a single trust",
+    VAR IsOutside = MAX ( vw_spc_xmr[outside_limits] )
+    VAR IsRun7 = MAX ( vw_spc_xmr[run_of_7_plus] )
+    VAR Val = AVERAGE ( vw_spc_xmr[value] )
+    VAR MeanVal = AVERAGE ( vw_spc_xmr[mean_value] )
+    RETURN
+        SWITCH (
+            TRUE (),
+            IsOutside && Val < MeanVal, "Special Cause — Concerning (3-Sigma Low)",
+            IsOutside && Val > MeanVal, "Special Cause — Improving (3-Sigma High)",
+            IsRun7 && Val < MeanVal, "Special Cause — Sustained Shift Below Mean (7+)",
+            IsRun7 && Val > MeanVal, "Special Cause — Sustained Shift Above Mean (7+)",
+            "Common Cause Variation"
+        )
+)
+
+/// Conditional-formatting hex colour aligned with nhs_theme.json.
+SPC Status Colour =
+SWITCH (
+    TRUE (),
+    CONTAINSSTRING ( [SPC Variation Status], "Concerning" ), "#DA291C",
+    CONTAINSSTRING ( [SPC Variation Status], "Below Mean" ), "#ED8B00",
+    CONTAINSSTRING ( [SPC Variation Status], "Improving" ), "#009639",
+    CONTAINSSTRING ( [SPC Variation Status], "Above Mean" ), "#00A499",
+    "#005EB8"
+)
+
+/// Dynamic national rank among active NHS trusts with Type 1 A&E (1 = highest 4-hour %).
+/// Format: #,0
+Trust National AE Rank =
+IF (
+    HASONEVALUE ( vw_dim_trust[org_code] )
+        && MAX ( vw_dim_trust[provider_type] ) = "NHS trust"
+        && MAX ( vw_dim_trust[has_type1_ae] ) = TRUE (),
+    RANKX (
+        FILTER (
+            ALL ( vw_dim_trust ),
+            vw_dim_trust[provider_type] = "NHS trust"
+                && vw_dim_trust[has_type1_ae] = TRUE ()
+                && NOT ISBLANK ( [AE 4hr %] )
+        ),
+        [AE 4hr %],
+        ,
+        DESC,
+        DENSE
+    )
+)
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 06 Data Quality & Pipeline Health
+// -----------------------------------------------------------------------------
+
+/// Count of WARN or FAIL data quality flags in the current filter context.
+/// Format: #,0
+Open DQ Issues =
+CALCULATE (
+    SUM ( vw_data_quality[flag_count] ),
+    vw_data_quality[is_issue] = TRUE ()
+)
+
+/// Worst DQ status badge across filtered datasets/months.
+Pipeline Health Status =
+VAR MinSev = MIN ( vw_data_quality[severity_order] )
+RETURN
+    SWITCH ( MinSev, 1, "FAIL — Action Required", 2, "WARN — Review Drift", 3, "OK — Healthy", "No Data" )
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 07 Signals & Statistical Findings (vw_changepoints, vw_correlations)
+// Relationships: vw_dim_date[month_date] 1 -> * vw_changepoints[month_date], vw_correlations[month_date];
+//                vw_dim_trust[org_code] 1 -> * vw_changepoints[org_code] (org_code may be missing from
+//                vw_dim_trust for non-trust providers; keep the relationship inactive-tolerant).
+// -----------------------------------------------------------------------------
+
+/// A&E level shifts (PELT) on the trust's own series, in the current filter context.
+Raw A&E Changepoints =
+CALCULATE (
+    COUNTROWS ( vw_changepoints ),
+    vw_changepoints[measure_dataset] = "ae_attendances",
+    vw_changepoints[series] = "Raw",
+    vw_changepoints[signal_type] = "changepoint"
+)
+
+/// Raw A&E level shifts that the peer-relative series (trust minus national) also shows within a month.
+/// These are the shifts least likely to be a national or seasonal pattern.
+Robust A&E Changepoints =
+CALCULATE (
+    [Raw A&E Changepoints],
+    vw_changepoints[is_robust] = TRUE ()
+)
+
+/// Share of raw A&E changepoints that are robust. Never average this across trusts.
+Robust Changepoint Share =
+DIVIDE ( [Robust A&E Changepoints], [Raw A&E Changepoints] )
+
+/// Trust-level A&E vs RTT associations that survive Benjamini-Hochberg FDR control (q <= 0.05).
+/// Association only; with 6 paired changes every interval is very wide.
+Significant After FDR =
+CALCULATE (
+    COUNTROWS ( vw_correlations ),
+    vw_correlations[finding_category] = "Significant after FDR"
+)
+
+/// Associations significant on raw p < 0.05 (before multiplicity correction), for comparison.
+Raw p < 0.05 =
+CALCULATE (
+    COUNTROWS ( vw_correlations ),
+    vw_correlations[p_value] < 0.05
+)
+
+/// Rows with fewer than 12 paired observations (all current rows), shown as exploratory.
+Exploratory Findings =
+CALCULATE ( COUNTROWS ( vw_correlations ), vw_correlations[is_exploratory] = TRUE () )
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 08 Admissions & Target Gap (vw_ae_performance)
+// -----------------------------------------------------------------------------
+
+/// Patients admitted via A&E.
+Admissions via A&E = SUM ( vw_ae_performance[admissions] )
+
+/// Admissions as a share of attendances (volume-weighted, not an average of trust percentages).
+Admission Conversion % =
+DIVIDE ( [Admissions via A&E], SUM ( vw_ae_performance[attendances] ) )
+
+/// 4-hour breaches above the number the national target allows. Never negative per trust-month,
+/// so it is additive across trusts and months.
+Excess Breaches vs Target = SUM ( vw_ae_performance[excess_breaches_vs_target] )
+
+
+// -----------------------------------------------------------------------------
+// Display Folder: 09 Primary Care Context (vw_primary_care_icb) and Data Freshness
+// -----------------------------------------------------------------------------
+
+/// Prescribing items (BNF sections held in fact_prescribing; GP practice setting).
+Prescribing Items = SUM ( vw_primary_care_icb[prescribing_items] )
+
+/// Dental UDAs delivered as a share of contract target (volume-weighted over the filtered ICBs).
+UDA Achievement % =
+DIVIDE ( SUM ( vw_primary_care_icb[uda_delivered] ), SUM ( vw_primary_care_icb[uda_target] ) )
+
+/// Failed pipeline runs among each stage x dataset's latest run only.
+Failed Latest Runs =
+CALCULATE ( COUNTROWS ( vw_pipeline_health ), vw_pipeline_health[latest_run] = TRUE (), vw_pipeline_health[is_failure] = TRUE () )
+
+/// Latest data month loaded for the selected dataset ("data as of").
+Data Loaded Through = MAX ( vw_pipeline_health[data_loaded_through] )

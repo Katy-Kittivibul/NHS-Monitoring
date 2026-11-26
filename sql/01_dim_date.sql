@@ -1,4 +1,5 @@
 -- Purpose: month-grain date dimension (April-start financial year) spanning the loaded data, for Power BI time intelligence.
+-- Grain: one row per calendar month (month_date, first of the month).
 -- Note: Named vw_dim_date because reporting.dim_date is already the raw table copied by reporting/load_postgres.py.
 DROP VIEW IF EXISTS reporting.vw_dim_date CASCADE;
 CREATE VIEW reporting.vw_dim_date AS

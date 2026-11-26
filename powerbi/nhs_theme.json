@@ -1,0 +1,33 @@
+{
+  "name": "NHS Report",
+  "dataColors": ["#005EB8", "#41B6E6", "#768692", "#ED8B00", "#DA291C", "#009639", "#003087", "#00A499"],
+  "background": "#FFFFFF",
+  "foreground": "#425563",
+  "tableAccent": "#005EB8",
+  "good": "#009639",
+  "neutral": "#FFB81C",
+  "bad": "#DA291C",
+  "maximum": "#003087",
+  "center": "#41B6E6",
+  "minimum": "#E8EDEE",
+  "textClasses": {
+    "callout": { "fontSize": 30, "fontFace": "Segoe UI Semibold", "color": "#003087" },
+    "title": { "fontSize": 12, "fontFace": "Segoe UI Semibold", "color": "#003087" },
+    "header": { "fontSize": 12, "fontFace": "Segoe UI Semibold", "color": "#425563" },
+    "label": { "fontSize": 10, "fontFace": "Segoe UI", "color": "#425563" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "background": [{ "show": true, "color": { "solid": { "color": "#FFFFFF" } }, "transparency": 0 }],
+        "border": [{ "show": true, "color": { "solid": { "color": "#E8EDEE" } }, "radius": 8 }],
+        "title": [{ "fontColor": { "solid": { "color": "#003087" } }, "fontSize": 12, "fontFamily": "Segoe UI Semibold", "alignment": "left" }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{ "color": { "solid": { "color": "#F0F4F5" } }, "transparency": 0 }]
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 -- Purpose: data quality flags summarised by dataset, month, check and status, with a severity order, so Power BI can show pipeline health beside the performance views.
+-- Grain: one row per dataset x month_date x check_name x status.
 DROP VIEW IF EXISTS reporting.vw_data_quality CASCADE;
 CREATE VIEW reporting.vw_data_quality AS
 SELECT

@@ -159,10 +159,58 @@ CREATE TABLE dim_organisation (
     org_type VARCHAR,                -- 'trust', 'practice', 'icb' — dental only ever contributes 'icb' rows
                                       -- (COMMISSIONER_CODE), not one row per dental contract
     parent_org_code VARCHAR,         -- Parent ICB or NHS Region code
-    region_name VARCHAR,             -- NHS Region
-    specialist_no_ae BOOLEAN         -- trust-only; see README's Stage 0 section
+    region_name VARCHAR,             -- NHS Region, canonical full name e.g. 'NHS ENGLAND MIDLANDS'
+    specialist_no_ae BOOLEAN,        -- trust-only; see README's Stage 0 section
+    region_code VARCHAR              -- NHS Region code, 'Y56'..'Y63' (trusts only)
 );
 ```
+
+**Type precedence.** The same code can legitimately appear in two roles — an A&E walk-in
+centre is a `trust` to A&E/RTT and a `practice` in GP prescribing. Every loader writes
+through `etl.common.upsert_organisations`, which ranks `trust` > `icb` > `practice` and
+never lets a lower-ranked load overwrite a higher-ranked row's type *or* attributes, so the
+result no longer depends on load order. (Databases built before this fix may still hold
+`practice` for those walk-in centres; `sql/02_dim_trust.sql` derives trust membership from
+the fact tables for that reason.)
+
+**Region.** `region_name` used to hold the region *code* when the RTT load ran last and the
+full *name* otherwise. Both loads now go through `etl.common.normalise_region` and write the
+canonical pair (`region_code`, `region_name`). A reload (`--force`) fixes an older database.
+
+### Run observability: `pipeline_runs` and `ingestion_manifest`
+```sql
+CREATE TABLE pipeline_runs (        -- one row per (stage, dataset) execution, success or failure
+    run_id VARCHAR PRIMARY KEY, stage VARCHAR, dataset VARCHAR,
+    started_at TIMESTAMP, finished_at TIMESTAMP,
+    status VARCHAR,                  -- running | success | skipped | failed
+    rows_processed BIGINT,
+    detail VARCHAR                   -- JSON {files_loaded, files_skipped}, or the exception text
+);
+CREATE TABLE ingestion_manifest (   -- one row per raw file currently reflected in the facts
+    file_name VARCHAR PRIMARY KEY, dataset VARCHAR, sha256 VARCHAR,
+    loaded_at TIMESTAMP, row_count BIGINT
+);
+```
+A raw file whose sha256 is already in `ingestion_manifest` is skipped on the next run;
+`python etl/run_all.py --force` reloads everything. The manifest row is the commit marker:
+it is deleted before a file is written and re-inserted only after the write completes, so a
+crash mid-load means that file is retried, never skipped. (An explicit transaction would be
+simpler, but the DuckDB pinned in `requirements.txt` rejects a same-transaction delete and
+re-insert of one primary key.) Loading new data makes `dq_flags`, `cp_signals` and the
+correlation tables stale — `etl/run_all.py` says so when any file was loaded.
+
+### Source availability (checked 2026-11-26)
+| Dataset | Latest published | Fetched by |
+| :--- | :--- | :--- |
+| A&E, RTT | 2026-08 | `etl/download.py` (Playwright) |
+| NHSBSA dental UDA | 2026-08 | `etl/download.py --datasets dental` (plain HTTP) |
+| GP prescribing | OpenPrescribing blocks scripted clients (Cloudflare challenge); the NHSBSA EPD it is built on ends 2025-06 and is ~7 GB/month | manual download |
+
+So GP prescribing stays at 2025-03 and any cross-dataset correlation involving it must be
+limited to the months both datasets cover. NHSBSA changed its dental files from 2026: the
+period became `YYYY-MM` and `BAND_URGENT_DELIVERED` became `BAND_UNSCHEDULED_DELIVERED`
+(monthly totals are continuous across the rename); some months (2025-04, 2025-05) are
+Windows-1252, not UTF-8. `etl/dental_uda.py` handles all three.
 
 Two further tables were added later, once real ODS-code mismatches surfaced while wiring
 Stage 3's correlation pipeline together — `dim_sub_icb` (bridges GP prescribing's Sub ICB
@@ -181,3 +229,84 @@ CREATE TABLE dim_date (
     financial_year VARCHAR           -- '2023/24'
 );
 ```
+
+## 6. PostgreSQL reporting layer (`reporting/` + `sql/`)
+
+`make reporting` copies these DuckDB tables into the PostgreSQL schema `reporting` in **one
+transaction** (a failed refresh leaves the previous schema readable; row counts are checked
+before COMMIT) and then applies the views in `sql/run_all.sql`.
+
+| Table | Grain | Rows (real data) | Notes |
+|---|---|---|---|
+| `dim_organisation`, `dim_date`, `dim_sub_icb` | org / month / sub-ICB | 6.6k / 96 / 107 | `dim_organisation.region_code` is a clean code |
+| `fact_ae_attendances` | org × month | ~5.9k | |
+| `fact_rtt_waits` | org × specialty × month | ~109k | `C_999` is the per-trust total |
+| `fact_prescribing` | month × practice × BNF section × setting | ~82k | one BNF section (0205) today; aggregate in DuckDB before loading if more are added |
+| `fact_dental_uda` | month × contract | ~95k | |
+| `dq_flags`, `cp_signals` | see Stage 1/2 | | |
+| `corr_signals` | tier × dataset pair × geography × month | ~3.4k | Tier 1 + Tier 2 |
+| `corr_signals_tier3a`, `corr_signals_tier3b` | trust × ICB × month × finding | ~2.1k / 85 | Tier 3 |
+| `pipeline_runs` | one ETL run | | optional tables load **empty** if their stage has not run yet |
+
+| View | Grain | Purpose |
+|---|---|---|
+| `vw_ae_targets` | financial year | national A&E target by date range (a parameter view, not a literal) |
+| `vw_dim_date`, `vw_dim_trust` | month / provider | conformed dimensions |
+| `vw_ae_performance` | trust × month | now also `admissions`, `admission_conversion_pct`, `excess_breaches_vs_target` |
+| `vw_rtt_performance`, `vw_rtt_specialty` | trust × month (× specialty) | never add them together |
+| `vw_spc_xmr`, `vw_benchmark`, `vw_data_quality` | | control charts, benchmarks, DQ |
+| `vw_changepoints` | one `cp_signals` row | Stage 2 signals with trust/ICB attributes and parsed values |
+| `vw_correlations` | tier × pair × geography × month | Tier 1/2/3 unified; r, p, n parsed from `detail`; **exploratory only** (n = 6, p-values uncorrected) |
+| `vw_primary_care_icb` | ICB × month | prescribing and dental side by side; either side can be NULL for a month |
+| `vw_pipeline_health` | pipeline run | duration, failure flag, latest data month per dataset |
+
+`excess_breaches_vs_target` is the number of breaches above what the target allows, floored at
+0. `vw_correlations.finding_category = 'Correlated'` means |r| >= 0.5, **not** statistical
+significance; Phase 2 will add a multiple-testing-corrected `q_value`.
+
+## 7. Statistical method (Stage 2 and Stage 3)
+
+**Stage 2 series.** `cp_signals.dataset` now holds four monitored series, each with its own
+XmR limits and PELT penalty (nothing is shared between A&E and RTT):
+
+| `dataset` | Series |
+|---|---|
+| `ae_attendances` | trust A&E breach % (the headline series Tier 3 and the dashboard read) |
+| `ae_attendances_peer` | trust breach % minus the national volume-weighted breach % for the month |
+| `rtt_waits` | trust RTT % waiting over 18 weeks (`C_999` totals) |
+| `rtt_waits_peer` | the same, minus the national weighted value |
+
+*Why peer-relative.* With ~30 months there are only ~2.5 seasonal cycles, so a per-calendar-month
+seasonal offset is poorly estimated and can absorb a real shift. Subtracting the same month's
+national value removes shared seasonality and national shocks without a seasonal model.
+`vw_changepoints.is_robust` is TRUE for a raw changepoint when the peer-relative series has one
+for the same trust within a month. Trusts whose **median monthly volume** is below
+`cp.signals.MIN_MONTHLY_VOLUME` (A&E 1,000 attendances, RTT 500 pathways) are not monitored, and
+the floor is written into each signal's `detail`.
+
+*PELT penalty.* The BIC penalty is `2 x var x log(n)`. The previous `1 x var x log(n)` reported a
+spurious changepoint in 50-60% of pure-noise series (seeded simulation in
+`tests/test_cp.py::TestPenaltyCalibration`); with the factor 2 that falls to under 10% while every
+2-sigma shift is still found. Existing signals are therefore fewer than in earlier versions.
+
+**Stage 3 correlation.**
+- *Basis:* month-on-month **changes** (first differences), 6 paired changes per window (7 months of
+  levels). Levels are not used: trending series correlate spuriously and their p-values are
+  over-confident (the simulation test shows ~4x the nominal false-positive rate).
+- *Stored per row:* `p_value`, `n_obs`, `ci_low`/`ci_high` (95% Fisher-z interval), `q_value`
+  (Benjamini-Hochberg) and `is_significant_fdr` (`q <= 0.05`), on `corr_signals` and
+  `corr_signals_tier3a`.
+- *Test families* (BH is only meaningful within one family; `corr/inference.py`): Tier 1/2 =
+  tier x dataset pair x window-end month (windows overlap, so months are not pooled); Tier 3A =
+  one family per metric (prescribing / dental) across all trusts and signal months. BH assumes
+  independent or positively dependent tests; neighbouring trusts share ICBs, which is positive
+  dependence.
+- *Not done:* a block-permutation p-value. With 6 paired changes it adds little over the
+  Pearson/Fisher result; the first-difference transform is what removes the trend problem.
+- *Anchor:* Tier 3 fallback months now come from `MAX(month_date)` in `fact_ae_attendances`, not a
+  hard-coded `2025-03-01`.
+
+**Executive brief.** `make brief` (or `python reporting/generate_executive_brief.py`) writes
+`docs/executive_findings.md`. Every figure is a query; it carries the as-of month, data window and
+git commit (`-dirty` when the tree has uncommitted changes) and is byte-reproducible. The A&E
+target table in the generator is checked against `sql/00_ae_targets.sql` by a test.

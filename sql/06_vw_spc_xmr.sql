@@ -1,4 +1,5 @@
 -- Purpose: XmR (individuals and moving-range) control chart per trust and measure, flagging points outside limits and runs of 7+ on one side of the mean.
+-- Grain: one row per org_code x measure x month_date.
 -- Note: Limits are mean +/- 2.66 x average moving range over the trust's full history, clipped to 0-100 (they are percentages); only trusts with 15+ monthly points per measure are included.
 DROP VIEW IF EXISTS reporting.vw_spc_xmr CASCADE;
 CREATE VIEW reporting.vw_spc_xmr AS

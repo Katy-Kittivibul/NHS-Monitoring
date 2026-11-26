@@ -1,4 +1,5 @@
 -- Purpose: trust x month RTT performance from the C_999 total row only: waiting list, % within 18 weeks vs the 92% standard, 52+ week waiters, rolling and year-on-year.
+-- Grain: one row per org_code x month_date.
 -- Note: C_999 is the per-trust total across specialties; summing it with specialty rows double counts, so specialty detail lives in vw_rtt_specialty. 92% is the NHS Constitution RTT standard (restated in the Medium Term Planning Framework 2026/27 to 2028/29).
 DROP VIEW IF EXISTS reporting.vw_rtt_performance CASCADE;
 CREATE VIEW reporting.vw_rtt_performance AS
