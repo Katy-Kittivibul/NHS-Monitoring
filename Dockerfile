@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 FROM python:3.12-slim AS runtime
 
+LABEL org.opencontainers.image.source="https://github.com/Katy-Kittivibul/NHS-Monitoring" \
+      org.opencontainers.image.licenses="MIT"
+
 # PYTHONDONTWRITEBYTECODE keeps the bind-mounted source tree free of __pycache__
 # owned by root; PYTHONUNBUFFERED makes the pipeline's progress prints stream.
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -33,9 +36,11 @@ COPY etl/ ./etl/
 COPY dq/ ./dq/
 COPY cp/ ./cp/
 COPY corr/ ./corr/
+COPY reporting/ ./reporting/
+COPY sql/ ./sql/
 COPY tests/ ./tests/
 COPY app/ ./app/
-COPY pyproject.toml requirements.txt README.md ./
+COPY pyproject.toml requirements.txt README.md LICENSE ./
 
 RUN useradd --create-home --uid 1000 appuser \
     && mkdir -p /app/data/processed /app/data/raw \

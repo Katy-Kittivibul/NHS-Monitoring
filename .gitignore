@@ -35,11 +35,6 @@ ENV/
 .env*.local
 !.env.example
 
-# Agent workspaces & files
-.claude/
-.gemini/
-CLAUDE.md
-
 # IDE & Editor configs
 .vscode/
 .idea/

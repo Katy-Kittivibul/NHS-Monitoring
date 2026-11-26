@@ -5,7 +5,7 @@
 DB ?= data/processed/nhs.duckdb
 PY ?= python
 
-.PHONY: help install pipeline etl dq cp corr tier3 reporting views test test-hermetic lint docker dashboard clean
+.PHONY: help install all pipeline download-dental etl dq cp corr tier3 reporting views brief fixture demo test test-hermetic lint docker docker-reporting dashboard clean
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
@@ -14,8 +14,11 @@ install:  ## Install runtime + dev dependencies and the project itself
 	$(PY) -m pip install -r requirements.txt
 	$(PY) -m pip install -e ".[dev]"
 
-etl:  ## Stage 0 — load the four raw datasets into DuckDB
-	$(PY) etl/run_all.py
+download-dental:  ## Fetch NHSBSA dental months over HTTP (no browser). A&E/RTT: python -m etl.download (needs the ingest extra)
+	$(PY) -m etl.download --datasets dental
+
+etl:  ## Stage 0 — load the four raw datasets into DuckDB (unchanged files are skipped; FORCE=1 reloads all)
+	$(PY) etl/run_all.py $(if $(FORCE),--force,)
 
 dq: etl  ## Stage 1 — data quality drift checks
 	$(PY) dq/run_all.py
@@ -27,6 +30,8 @@ corr: cp  ## Stage 3 — cross-dataset correlation (Tiers 1 and 2)
 	$(PY) corr/run_all.py
 
 pipeline: corr  ## Run stages 0-3 end to end
+
+all: pipeline reporting  ## Stages 0-3, then load PostgreSQL and apply the views (needs .env)
 
 tier3: corr  ## Stage 3 Tier 3 — needs network: one NHS ODS API call per trust
 	$(PY) corr/reference/trust_to_icb.py
@@ -47,8 +52,21 @@ test-hermetic:  ## Only the tests that need no data — what CI actually exercis
 lint:  ## ruff
 	$(PY) -m ruff check .
 
+brief:  ## Regenerate docs/executive_findings.md from $(DB) (every figure comes from a query; run after `make pipeline`)
+	$(PY) reporting/generate_executive_brief.py $(DB)
+
+fixture:  ## Build the small synthetic DuckDB used by CI -> data/processed/fixture.duckdb (try: make reporting DB=data/processed/fixture.duckdb)
+	$(PY) tests/fixtures/build_fixture_db.py data/processed/fixture.duckdb
+
+demo:  ## 60-second demo: build the synthetic fixture and serve the dashboard on it (no downloads, no database needed)
+	$(PY) tests/fixtures/build_fixture_db.py data/processed/fixture.duckdb
+	NHS_DB_PATH=data/processed/fixture.duckdb $(PY) -m streamlit run app/dashboard.py
+
 docker:  ## Build the image
 	docker build -t nhs-monitoring-copilot:latest .
+
+docker-reporting:  ## Run the pipeline, then load a containerised PostgreSQL (docker compose profile "reporting")
+	docker compose --profile reporting up --build postgres reporting
 
 dashboard:  ## Serve the Streamlit dashboard against $(DB)
 	$(PY) -m streamlit run app/dashboard.py
