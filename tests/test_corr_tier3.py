@@ -21,6 +21,7 @@ from corr.tier3_signal_driven import (
 )
 from etl.common import get_connection
 
+HEADLINE_SIGNAL_TRUSTS = "SELECT DISTINCT org_code FROM cp_signals WHERE dataset = 'ae_attendances'"
 REAL_DB_PATH = "data/processed/nhs.duckdb"
 TRUST_TO_ICB_PATH = "corr/reference/trust_to_icb.csv"
 
@@ -194,8 +195,10 @@ class TestQuestionBEligibleTrusts:
                 ('RFLAT', 'Active trust, no signal', 'trust', NULL, NULL, FALSE),
                 ('RAN', 'Specialist, no A&E', 'trust', NULL, NULL, TRUE)
         """)
-        conn.execute("CREATE TABLE cp_signals (org_code VARCHAR, month_date DATE, method VARCHAR)")
-        conn.execute("INSERT INTO cp_signals VALUES ('R0A', '2024-09-01', 'pelt_changepoint')")
+        conn.execute(
+            "CREATE TABLE cp_signals (dataset VARCHAR, org_code VARCHAR, month_date DATE, method VARCHAR)")
+        conn.execute(
+            "INSERT INTO cp_signals VALUES ('ae_attendances', 'R0A', '2024-09-01', 'pelt_changepoint')")
 
         eligible = get_question_b_eligible_trusts(conn)
         assert eligible == ["RFLAT"]
@@ -215,7 +218,7 @@ class TestRealDataIntegration:
     def test_question_a_covers_every_signal_trust(self):
         conn = get_connection(REAL_DB_PATH)
         try:
-            signal_trusts = set(conn.execute("SELECT DISTINCT org_code FROM cp_signals").df()["org_code"])
+            signal_trusts = set(conn.execute(HEADLINE_SIGNAL_TRUSTS).df()["org_code"])
         finally:
             conn.close()
 
@@ -246,7 +249,7 @@ class TestRealDataIntegration:
         run_question_a(REAL_DB_PATH)
         conn = get_connection(REAL_DB_PATH)
         try:
-            trust_to_icb_multi = conn.execute("SELECT DISTINCT org_code FROM cp_signals").df()
+            trust_to_icb_multi = conn.execute(HEADLINE_SIGNAL_TRUSTS).df()
         finally:
             conn.close()
         # RYX is a known multi-ICB trust (QMJ/QRV/QWE all active in the report window)
@@ -278,7 +281,7 @@ class TestRealDataIntegration:
     def test_question_b_and_question_a_trust_sets_are_disjoint(self):
         conn = get_connection(REAL_DB_PATH)
         try:
-            signal_trusts = set(conn.execute("SELECT DISTINCT org_code FROM cp_signals").df()["org_code"])
+            signal_trusts = set(conn.execute(HEADLINE_SIGNAL_TRUSTS).df()["org_code"])
             eligible = set(get_question_b_eligible_trusts(conn))
         finally:
             conn.close()

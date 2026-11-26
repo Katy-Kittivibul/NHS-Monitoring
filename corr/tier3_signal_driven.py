@@ -40,16 +40,32 @@ if str(_ROOT) not in sys.path:
 import pandas as pd
 
 from corr.correlation import WINDOW_MONTHS, rolling_correlation
+from corr.inference import annotate_fdr
 from corr.reference.trust_to_icb import load_trust_to_icb
 from corr.rollups import get_ae_breach_pct_by_trust
 from corr.tier3_deltas import to_mom_delta
 from corr.tier3_rollups import get_dental_pct_achieved_by_icb, get_prescribing_items_by_icb
 from cp.changepoints import MIN_POINTS as CP_MIN_POINTS
 from cp.changepoints import detect_changepoints
+from cp.signals import HEADLINE_DATASET
 from etl.common import get_connection
 
 CORRELATION_THRESHOLD = 0.5  # |r| at/above this counts as "correlated" for Question A
-NO_DATA_ANCHOR = pd.Timestamp("2025-03-01")  # fallback month_date when an ICB has no rows at all
+TIER3A_INFERENCE_COLUMNS = [
+    ("p_value", "DOUBLE"), ("n_obs", "INTEGER"), ("ci_low", "DOUBLE"), ("ci_high", "DOUBLE"),
+    ("q_value", "DOUBLE"), ("is_significant_fdr", "BOOLEAN"),
+]
+TIER_COLUMNS = ["trust_code", "icb_code", "month_date", "finding", "detail"]
+
+
+def get_data_anchor(conn) -> pd.Timestamp:
+    """Fallback month_date for rows about an ICB/trust with no data of its own: the latest month
+    loaded in the A&E fact. Derived from the database so it moves when new months are loaded
+    (it used to be the hard-coded 2025-03-01)."""
+    anchor = conn.execute("SELECT MAX(month_date) FROM fact_ae_attendances").fetchone()[0]
+    if anchor is None:
+        raise RuntimeError("fact_ae_attendances is empty: run the ETL before Tier 3")
+    return pd.Timestamp(anchor)
 
 
 def ensure_tier3_schema_exists(conn):
@@ -65,6 +81,8 @@ def ensure_tier3_schema_exists(conn):
                 PRIMARY KEY (trust_code, icb_code, month_date, finding)
             )
         """)
+    for column, ddl in TIER3A_INFERENCE_COLUMNS:  # Question A only: B has no correlation to test
+        conn.execute(f"ALTER TABLE corr_signals_tier3a ADD COLUMN IF NOT EXISTS {column} {ddl}")
 
 
 def write_tier3_signals(conn, table: str, trust_code: str, signals: list[dict]):
@@ -73,8 +91,9 @@ def write_tier3_signals(conn, table: str, trust_code: str, signals: list[dict]):
     conn.execute(f"DELETE FROM {table} WHERE trust_code = ?", [trust_code])
     if not signals:
         return
-    df = pd.DataFrame(signals)  # noqa: F841 — referenced by name in SQL below
-    conn.execute(f"INSERT INTO {table} SELECT * FROM df")
+    columns = TIER_COLUMNS + ([c for c, _ in TIER3A_INFERENCE_COLUMNS] if table.endswith("3a") else [])
+    df = pd.DataFrame(signals).reindex(columns=columns)  # noqa: F841 — referenced by name in SQL below
+    conn.execute(f"INSERT INTO {table} ({', '.join(columns)}) SELECT * FROM df")
 
 
 def resolve_trust_icb(trust_to_icb: pd.DataFrame, trust_code: str) -> tuple[str, str, str]:
@@ -114,7 +133,8 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
         trust_to_icb = load_trust_to_icb()
 
         signal_months = conn.execute(
-            "SELECT DISTINCT org_code AS trust_code, month_date FROM cp_signals"
+            "SELECT DISTINCT org_code AS trust_code, month_date FROM cp_signals "
+            f"WHERE dataset = '{HEADLINE_DATASET}'"
         ).df()
 
         trust_breach_delta = to_mom_delta(get_ae_breach_pct_by_trust(conn))
@@ -123,7 +143,7 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
             "dental": to_mom_delta(get_dental_pct_achieved_by_icb(conn)),
         }
 
-        all_signals = []
+        per_trust: dict[str, list[dict]] = {}
         for trust_code, group in signal_months.groupby("trust_code"):
             icb_code, status, status_detail = resolve_trust_icb(trust_to_icb, trust_code)
             signals = []
@@ -161,11 +181,18 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
                             else f"{metric}_no_correlated_shift"
                         signals.append({
                             "trust_code": trust_code, "icb_code": icb_code, "month_date": signal_month,
-                            "finding": finding, "detail": result["detail"],
+                            "finding": finding, "detail": result["detail"], "metric": metric,
+                            "p_value": result["p_value"], "n_obs": result["n_obs"],
+                            "ci_low": result["ci_low"], "ci_high": result["ci_high"],
                         })
 
-            write_tier3_signals(conn, "corr_signals_tier3a", trust_code, signals)
-            all_signals.extend(signals)
+            per_trust[trust_code] = signals
+
+        # One BH family per metric across every trust and signal month tested (corr/inference.py).
+        all_signals = [row for rows in per_trust.values() for row in rows]
+        annotate_fdr([row for row in all_signals if row.get("metric")], family_keys=("metric",))
+        for trust_code, rows in per_trust.items():
+            write_tier3_signals(conn, "corr_signals_tier3a", trust_code, rows)
 
         print(
             f"[OK] Tier 3 Question A: {len(all_signals)} signals "
@@ -181,10 +208,10 @@ def run_question_a(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
 def get_question_b_eligible_trusts(conn) -> list[str]:
     """fact_ae_attendances trusts with real activity (specialist_no_ae = FALSE)
     and zero cp_signals rows — Tier 2's "looked flat" population."""
-    return conn.execute("""
+    return conn.execute(f"""
         SELECT org_code FROM dim_organisation
         WHERE org_type = 'trust' AND specialist_no_ae = FALSE
-          AND org_code NOT IN (SELECT DISTINCT org_code FROM cp_signals)
+          AND org_code NOT IN (SELECT DISTINCT org_code FROM cp_signals WHERE dataset = '{HEADLINE_DATASET}')
         ORDER BY org_code
     """).df()["org_code"].tolist()
 
@@ -197,6 +224,7 @@ def run_question_b(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
         ensure_tier3_schema_exists(conn)
         trust_to_icb = load_trust_to_icb()
         eligible_trusts = get_question_b_eligible_trusts(conn)
+        data_anchor = get_data_anchor(conn)
 
         icb_series = {
             "prescribing": get_prescribing_items_by_icb(conn),
@@ -211,7 +239,7 @@ def run_question_b(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
             if status != "resolved":
                 anchor = conn.execute(
                     "SELECT MAX(month_date) FROM fact_ae_attendances WHERE org_code = ?", [trust_code]
-                ).fetchall()[0][0] or NO_DATA_ANCHOR
+                ).fetchall()[0][0] or data_anchor
                 for metric in ("prescribing", "dental"):
                     signals.append({
                         "trust_code": trust_code, "icb_code": icb_code, "month_date": anchor,
@@ -223,7 +251,7 @@ def run_question_b(db_path: str = "data/processed/nhs.duckdb") -> list[dict]:
                     icb_values_df = series[series["key"] == icb_code].sort_values("month_date")
 
                     if len(icb_values_df) < CP_MIN_POINTS:
-                        anchor = icb_values_df["month_date"].max() if len(icb_values_df) else NO_DATA_ANCHOR
+                        anchor = icb_values_df["month_date"].max() if len(icb_values_df) else data_anchor
                         signals.append({
                             "trust_code": trust_code, "icb_code": icb_code, "month_date": anchor,
                             "finding": f"{metric}_insufficient_data",

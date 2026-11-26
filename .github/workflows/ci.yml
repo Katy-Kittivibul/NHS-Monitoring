@@ -56,7 +56,7 @@ jobs:
 
       # Guard against the suite silently hollowing out: if a refactor makes the
       # hermetic tests stop collecting, this fails rather than passing vacuously.
-      # Measured at 78 passed / 64 skipped with no data/ present (2026-08-31); the
+      # Measured at 186 passed / 86 skipped with no data/ present (2026-11-26); the
       # floor sits below that so ordinary additions don't trip it. If grep finds no
       # count at all, PASSED falls back to 0 and this reports that, rather than
       # dying on a non-zero grep and hiding the reason.
@@ -65,20 +65,92 @@ jobs:
           PASSED=$(grep -oE '[0-9]+ passed' pytest-output.txt | tail -1 | grep -oE '^[0-9]+' || true)
           PASSED=${PASSED:-0}
           echo "Hermetic tests passed: $PASSED"
-          if [ "$PASSED" -lt 70 ]; then
-            echo "::error::Only $PASSED tests ran without data; expected at least 70."
+          if [ "$PASSED" -lt 165 ]; then
+            echo "::error::Only $PASSED tests ran without data; expected at least 165."
+            exit 1
+          fi
+
+  # The reporting layer (reporting/load_postgres.py + sql/ views) needs a real PostgreSQL,
+  # so the `test` job above can only check its structure. This job seeds a service
+  # container from the small synthetic DuckDB in tests/fixtures/, loads it exactly as
+  # `make reporting` would, and runs the view tests against it. REQUIRE_POSTGRES=1 turns
+  # "no server / nothing loaded" from a skip into a failure, and the guard step below
+  # fails the job if anything is skipped other than the two figures pinned to the real
+  # NHS extracts (which a synthetic fixture cannot reproduce).
+  postgres:
+    name: postgres views
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: nhs_ci
+          POSTGRES_USER: nhs_ci
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nhs_ci -d nhs_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGDATABASE: nhs_ci
+      PGUSER: nhs_ci
+      PGPASSWORD: ci-only-password
+      REQUIRE_POSTGRES: "1"
+      NHS_FIXTURE_DATA: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Build the synthetic fixture database
+        run: python tests/fixtures/build_fixture_db.py data/processed/fixture.duckdb
+      - name: Load PostgreSQL reporting schema and views
+        run: python reporting/load_postgres.py data/processed/fixture.duckdb
+      - name: Run view and loader tests
+        run: |
+          set -o pipefail
+          pytest -q -ra tests/test_sql_views.py tests/test_reporting.py | tee pg-output.txt
+      - name: Fail on any unexpected skip
+        run: |
+          UNEXPECTED=$(grep '^SKIPPED' pg-output.txt | grep -v 'pinned real-data figure' || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::Unexpected skipped Postgres tests:"
+            echo "$UNEXPECTED"
+            exit 1
+          fi
+          PASSED=$(grep -oE '[0-9]+ passed' pg-output.txt | tail -1 | grep -oE '^[0-9]+' || true)
+          echo "Postgres-backed tests passed: ${PASSED:-0}"
+          if [ "${PASSED:-0}" -lt 24 ]; then
+            echo "::error::Expected at least 24 passing tests, got ${PASSED:-0}."
             exit 1
           fi
 
   docker:
     name: docker build
-    needs: [lint, test]
+    needs: [lint, test, postgres]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Validate compose file (default and reporting profile)
+        run: |
+          docker compose config --quiet
+          docker compose --profile reporting config --quiet
       - name: Build image
         run: docker build -t nhs-monitoring-copilot:ci .
+      - name: Image carries the reporting loader and SQL views
+        run: docker run --rm nhs-monitoring-copilot:ci python -c "from reporting.apply_views import view_files; assert len(view_files()) >= 13"
       - name: Dashboard starts and serves its health endpoint
         run: |
           docker run -d --name nhs-ci -p 8501:8501 nhs-monitoring-copilot:ci

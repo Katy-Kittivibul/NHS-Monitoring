@@ -4,17 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nhs-monitoring-copilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-dataset signal detection over four public NHS datasets (ETL, data quality, changepoints, correlation)."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Katy Kittivibul" }]
 
 # Runtime pins live in requirements.txt and are installed with
 # `pip install -r requirements.txt`. They are deliberately not duplicated here:
 # two dependency lists drift, and the pinned file is what CI and Docker install.
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/Katy-Kittivibul/NHS-Monitoring"
+
 [project.optional-dependencies]
+# Only etl/download.py's A&E/RTT scraping needs a browser (england.nhs.uk answers plain
+# HTTP clients with an empty HTTP 202). Everything else, including the NHSBSA dental
+# download, runs without it:  pip install -e ".[ingest]" && playwright install chromium
+ingest = [
+    "playwright>=1.44,<2",
+]
 dev = [
     "pytest==7.4.4",
     "ruff==0.6.9",
@@ -24,8 +35,7 @@ dev = [
 # The .reference subpackages are listed explicitly: this is an exhaustive list, not
 # auto-discovery, so omitting them shipped a wheel with no corr/reference/ at all and
 # an ImportError in corr/tier3_signal_driven.py.
-packages = ["etl", "etl.reference", "dq", "cp", "corr", "corr.reference"]
-py-modules = ["dashboard_queries"]
+packages = ["app", "etl", "etl.reference", "dq", "cp", "corr", "corr.reference", "reporting"]
 
 [tool.setuptools.package-data]
 # The lookup CSVs are resolved relative to __file__ at runtime, so they have to be

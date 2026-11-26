@@ -15,6 +15,9 @@ from etl.common import (  # noqa: E402 — after the sys.path shim above
     create_dim_sub_icb,
     ensure_schema_exists,
     get_connection,
+    ingest_files,
+    replace_months,
+    upsert_organisations,
 )
 
 FILENAME_MONTH_RE = re.compile(r"openprescribing_spending_(\d{4})(\d{2})\.json$")
@@ -91,57 +94,33 @@ def load_prescribing_data(json_path: str = "data/raw/openprescribing_spending_20
     return result
 
 
-def etl_prescribing(db_path: str = "data/processed/nhs.duckdb"):
+def _write_prescribing(conn, df):
+    replace_months(conn, "fact_prescribing", df)
+
+    # Update dim_organisation with practices from this dataset. A practice row can never
+    # overwrite an org already known as a trust (A&E walk-in centres appear in both).
+    org_rows = df[["practice_code", "practice_name", "sub_icb_code"]].drop_duplicates(
+        "practice_code", keep="last"
+    )
+    org_rows = org_rows.rename(
+        columns={"practice_code": "org_code", "practice_name": "org_name", "sub_icb_code": "parent_org_code"}
+    )
+    org_rows["org_type"] = "practice"
+    upsert_organisations(conn, org_rows, ["org_name", "parent_org_code"])
+
+
+def etl_prescribing(db_path: str = "data/processed/nhs.duckdb", force: bool = False):
     """ETL pipeline for GP prescribing data."""
     conn = get_connection(db_path)
     try:
         ensure_schema_exists(conn)
         create_dim_sub_icb(conn)
-
-        json_files = sorted(Path("data/raw").glob("openprescribing_spending_*.json"))
-        if not json_files:
-            print("⚠ Skipping prescribing: No openprescribing_spending_*.json files found in data/raw/")
-            return
-
-        for json_path in json_files:
-            print(f"Loading GP prescribing: {json_path.name}...")
-            df = load_prescribing_data(str(json_path))
-            if df.empty:
-                continue
-
-            # Upsert into fact table (clear old data first for idempotency)
-            # Every month present, not just the first: a file covering more than one
-            # month would otherwise leave the later months in place and duplicate them
-            # on re-run. Same loop as etl/dental_uda.py.
-            for month_date in df["month_date"].unique():
-                conn.execute(
-                    "DELETE FROM fact_prescribing WHERE month_date = ?",
-                    [month_date]
-                )
-
-            conn.execute("""
-                INSERT INTO fact_prescribing
-                SELECT * FROM df
-            """)
-
-            # Update dim_organisation with practices from this dataset
-            org_rows = df[["practice_code", "practice_name", "sub_icb_code"]].drop_duplicates()
-            org_rows["org_type"] = "practice"
-            org_rows["parent_org_code"] = org_rows["sub_icb_code"]
-            org_rows["region_name"] = None
-            org_rows = org_rows.rename(columns={"practice_code": "org_code", "practice_name": "org_name"})
-
-            conn.execute("""
-                INSERT INTO dim_organisation (org_code, org_name, org_type, parent_org_code, region_name)
-                SELECT org_code, org_name, org_type, parent_org_code, region_name FROM org_rows
-                ON CONFLICT (org_code) DO UPDATE SET
-                    org_name = EXCLUDED.org_name,
-                    org_type = EXCLUDED.org_type,
-                    parent_org_code = EXCLUDED.parent_org_code
-            """)
-
-            print(f"[OK] Loaded prescribing ({json_path.name}): {len(df)} rows into fact_prescribing")
-
+        run = ingest_files(
+            conn, dataset="prescribing",
+            paths=sorted(Path("data/raw").glob("openprescribing_spending_*.json")),
+            load_fn=load_prescribing_data, write_fn=_write_prescribing, force=force,
+        )
+        return run
     finally:
         conn.close()
 

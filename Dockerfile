@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 FROM python:3.12-slim AS runtime
 
+LABEL org.opencontainers.image.source="https://github.com/Katy-Kittivibul/NHS-Monitoring" \
+      org.opencontainers.image.licenses="MIT"
+
 # PYTHONDONTWRITEBYTECODE keeps the bind-mounted source tree free of __pycache__
 # owned by root; PYTHONUNBUFFERED makes the pipeline's progress prints stream.
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -33,8 +36,11 @@ COPY etl/ ./etl/
 COPY dq/ ./dq/
 COPY cp/ ./cp/
 COPY corr/ ./corr/
+COPY reporting/ ./reporting/
+COPY sql/ ./sql/
 COPY tests/ ./tests/
-COPY dashboard.py dashboard_queries.py pyproject.toml requirements.txt README.md ./
+COPY app/ ./app/
+COPY pyproject.toml requirements.txt README.md LICENSE ./
 
 RUN useradd --create-home --uid 1000 appuser \
     && mkdir -p /app/data/processed /app/data/raw \
@@ -46,5 +52,5 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=4).status==200 else 1)"
 
-CMD ["streamlit", "run", "dashboard.py", \
+CMD ["streamlit", "run", "app/dashboard.py", \
      "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

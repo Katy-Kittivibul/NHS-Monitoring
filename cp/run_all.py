@@ -8,6 +8,8 @@ from cp.changepoints import run_changepoints
 from cp.signals import ensure_cp_schema_exists, get_connection
 from cp.spc_baseline import run_spc_baseline
 
+SERIES = [("ae_attendances", False), ("ae_attendances", True), ("rtt_waits", False), ("rtt_waits", True)]
+
 
 def run_all_cp(db_path: str = "data/processed/nhs.duckdb"):
     """Run Stage 2 SPC rules and PELT changepoint detection, then print a summary."""
@@ -21,11 +23,16 @@ def run_all_cp(db_path: str = "data/processed/nhs.duckdb"):
     finally:
         conn.close()
 
-    print("\n[1/2] SPC baseline rules (Part A)...")
-    run_spc_baseline(db_path)
-
-    print("\n[2/2] PELT changepoint detection (Part B)...")
-    run_changepoints(db_path)
+    # Each (dataset, peer) pair is its own series with its own limits and penalty. The raw A&E
+    # series is the headline one downstream stages read; the peer-relative series (trust minus
+    # the national value for the month) removes shared seasonality and national shocks, and a
+    # raw changepoint is "robust" when its peer-relative twin agrees (see vw_changepoints).
+    for dataset, peer in SERIES:
+        label = f"{dataset}{' (peer-relative)' if peer else ''}"
+        print(f"\n[{label}] SPC baseline rules (Part A)...")
+        run_spc_baseline(db_path, dataset=dataset, peer=peer)
+        print(f"[{label}] PELT changepoint detection (Part B)...")
+        run_changepoints(db_path, dataset=dataset, peer=peer)
 
     conn = get_connection(db_path)
     try:

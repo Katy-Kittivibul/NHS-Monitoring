@@ -43,6 +43,7 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 
+from cp.signals import HEADLINE_DATASET  # noqa: E402
 from etl.common import get_connection  # noqa: E402
 
 ODS_BASE = "https://directory.spineservices.nhs.uk/ORD/2-0-0/organisations"
@@ -67,11 +68,12 @@ _ICB_CODE_PATTERN = re.compile(r"^Q[A-Z0-9]{2}$|^[A-Z]\d[A-Z]\d[A-Z]$")
 
 def get_trust_universe(conn) -> list[str]:
     """cp_signals trusts, union Question B's eligible no-signal/non-specialist trusts."""
-    signal_trusts = set(conn.execute("SELECT DISTINCT org_code FROM cp_signals").df()["org_code"])
-    eligible = set(conn.execute("""
+    signal_trusts = set(conn.execute(
+        f"SELECT DISTINCT org_code FROM cp_signals WHERE dataset = '{HEADLINE_DATASET}'").df()["org_code"])
+    eligible = set(conn.execute(f"""
         SELECT org_code FROM dim_organisation
         WHERE org_type = 'trust' AND specialist_no_ae = FALSE
-          AND org_code NOT IN (SELECT DISTINCT org_code FROM cp_signals)
+          AND org_code NOT IN (SELECT DISTINCT org_code FROM cp_signals WHERE dataset = '{HEADLINE_DATASET}')
     """).df()["org_code"])
     return sorted(signal_trusts | eligible)
 

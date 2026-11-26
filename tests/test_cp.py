@@ -9,7 +9,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cp.changepoints import COST_MODEL, DEFAULT_PENALTY, bic_penalty, detect_changepoints, run_changepoints
+from cp.changepoints import (
+    COST_MODEL,
+    DEFAULT_PENALTY,
+    PENALTY_MULTIPLIER,
+    bic_penalty,
+    detect_changepoints,
+    run_changepoints,
+)
 from cp.run_all import run_all_cp
 from cp.signals import ensure_cp_schema_exists, get_ae_breach_pct_series, write_signals
 from cp.spc_baseline import rule1_beyond_3sigma, rule2_run_of_7, run_spc_baseline, xmr_limits
@@ -113,16 +120,42 @@ class TestRule2RunOf7:
 
 class TestValidatedConfig:
     def test_cost_model_and_penalty_match_10_trust_comparison(self):
-        # l2+BIC (var(signal) * log(n)) standardised on after comparing against
-        # rbf+1.2 across 10 trusts (R1H, R0A, plus 8 more spanning low/high
+        # l2+BIC (2 * var(signal) * log(n), see TestPenaltyCalibration) standardised on after
+        # comparing against rbf+1.2 across 10 trusts (R1H, R0A, plus 8 more spanning low/high
         # variance): 3 wins / 4 ties / 0 losses for l2+BIC, with rbf+1.2 missing
         # real shifts on R0A, G0Q0L, and R1K.
         assert COST_MODEL == "l2"
         assert DEFAULT_PENALTY is None  # signals "compute BIC penalty per-series"
 
-    def test_bic_penalty_is_variance_times_log_n(self):
+    def test_bic_penalty_is_multiplier_times_variance_times_log_n(self):
         values = np.array([20.0, 20.5, 19.8, 20.2, 19.9, 20.1] + [40.0, 40.5, 39.8, 40.2, 39.9, 40.1])
-        assert bic_penalty(values) == pytest.approx(float(np.var(values) * np.log(len(values))))
+        assert PENALTY_MULTIPLIER == 2.0
+        assert bic_penalty(values) == pytest.approx(
+            float(PENALTY_MULTIPLIER * np.var(values) * np.log(len(values))))
+
+
+class TestPenaltyCalibration:
+    """The penalty is chosen from a seeded simulation, not by eye (see changepoints.py)."""
+
+    @staticmethod
+    def _detect_rate(n, step_sd, penalty_multiplier, trials=300, seed=0):
+        rng = np.random.RandomState(seed)
+        hits = 0
+        for _ in range(trials):
+            x = rng.normal(size=n)
+            x[n // 2:] += step_sd
+            hits += bool(detect_changepoints(x, penalty=penalty_multiplier * np.var(x) * np.log(n)))
+        return hits / trials
+
+    def test_pure_noise_rarely_reports_a_changepoint(self):
+        for n in (13, 30):
+            assert self._detect_rate(n, 0.0, PENALTY_MULTIPLIER) <= 0.15
+
+    def test_the_old_penalty_was_far_too_liberal(self):
+        assert self._detect_rate(30, 0.0, 1.0) >= 0.40  # why the multiplier is 2, not 1
+
+    def test_a_two_sigma_shift_is_still_found(self):
+        assert self._detect_rate(30, 2.0, PENALTY_MULTIPLIER) >= 0.95
 
 
 class TestDetectChangepoints:

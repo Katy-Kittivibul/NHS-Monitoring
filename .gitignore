@@ -1,18 +1,22 @@
+# Data directories & databases
 data/raw/
 data/processed/
+data/exports/
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite3
+
+# Python byte-compiled / cache files
 __pycache__/
-*.pyc
-.DS_Store
+*.py[cod]
+*$py.class
 
-# Agent workspaces
-.claude/
-.gemini/
-
-# Testing
+# Testing & Linting
 .pytest_cache/
-
-# Generated outputs
-*.png
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Build artefacts
 build/
@@ -20,9 +24,34 @@ dist/
 *.egg-info/
 
 # Virtual environments
-venv/
-
-# Agent documentation
-CLAUDE.md
 .venv/
+venv/
 env/
+ENV/
+.env/
+
+# Environment files & local secrets
+.env
+.env*.local
+!.env.example
+
+# IDE & Editor configs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated outputs
+*.png
+!powerbi/**/*.png
+
+# Power BI: keep the text-based PBIP project in git, not binary .pbix or local caches
+*.pbix
+*.pbit
+**/.pbi/cache.abf
+**/.pbi/localSettings.json
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini

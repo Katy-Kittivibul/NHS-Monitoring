@@ -10,7 +10,8 @@ services:
     # Tier 3 is not run here. corr/reference/trust_to_icb.py calls the NHS ODS API
     # once per trust, so it needs outbound network and several minutes; run it
     # deliberately rather than on every `compose up`:
-    #   docker compose run --rm pipeline sh -c \n    #     "python corr/reference/trust_to_icb.py && python corr/tier3_signal_driven.py"
+    #   docker compose run --rm pipeline sh -c \
+    #     "python corr/reference/trust_to_icb.py && python corr/tier3_signal_driven.py"
     command: >
       sh -c "python etl/run_all.py &&
              python dq/run_all.py &&
@@ -28,3 +29,52 @@ services:
     depends_on:
       pipeline:
         condition: service_completed_successfully
+
+  # --- PostgreSQL serving layer for Power BI (opt-in) -----------------------------------
+  #   docker compose --profile reporting up postgres reporting
+  # A plain `docker compose up` is unchanged: neither service below starts without the
+  # profile. Credentials come from .env (see .env.example); the defaults here are for a
+  # throwaway local database only, and the port is bound to loopback so nothing else on
+  # the network can reach it.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["reporting"]
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-nhs}
+      POSTGRES_USER: ${PGUSER:-nhs_reporting}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-change-me}
+    ports:
+      - "127.0.0.1:${PGPORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Full-refresh DuckDB -> PostgreSQL "reporting" schema, then exits. load_postgres.py
+  # applies the sql/ views in the same transaction, so a failed load leaves the previous
+  # schema intact.
+  reporting:
+    build: .
+    image: nhs-monitoring-copilot:latest
+    profiles: ["reporting"]
+    volumes:
+      # Read-only: load_postgres.py opens the DuckDB file read_only.
+      - ./data:/app/data:ro
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${PGDATABASE:-nhs}
+      PGUSER: ${PGUSER:-nhs_reporting}
+      PGPASSWORD: ${PGPASSWORD:-change-me}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pipeline:
+        condition: service_completed_successfully
+    command: ["python", "reporting/load_postgres.py", "data/processed/nhs.duckdb"]
+
+volumes:
+  pgdata:

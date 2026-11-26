@@ -78,6 +78,29 @@ class TestAEAttendances:
         assert (df["breach_pct"] <= 100).all(), "Breach % should be <= 100"
 
 
+    def test_totals_row_dropped_whether_marked_in_period_or_org_code(self, tmp_path):
+        """Regression: the Feb 2026 file marks its totals row only via Org Code = TOTAL."""
+        cols = [
+            "Period", "Org Code", "Parent Org", "Org name",
+            "A&E attendances Type 1", "A&E attendances Type 2", "A&E attendances Other A&E Department",
+            "Attendances over 4hrs Type 1", "Attendances over 4hrs Type 2",
+            "Attendances over 4hrs Other Department",
+        ]
+        per = "MSitAE-FEBRUARY-2026"
+        rows = [
+            [per, "R1A", "NHS ENGLAND", "TRUST A", 100, 0, 0, 10, 0, 0],
+            [per, "R1B", "NHS ENGLAND", "TRUST B", 200, 0, 0, 20, 0, 0],
+            [per, "TOTAL ", "", "TOTAL", 300, 0, 0, 30, 0, 0],            # Feb 2026 style
+            ["Total", "Total", "", "Total", 300, 0, 0, 30, 0, 0],          # Period style
+        ]
+        path = tmp_path / "ae.csv"
+        pd.DataFrame(rows, columns=cols).to_csv(path, index=False)
+
+        df = load_ae_attendances(str(path))
+        assert sorted(df["org_code"]) == ["R1A", "R1B"]
+        assert df["total_attendances"].sum() == 300
+
+
 class TestRTTWaits:
     def test_parse_rtt_filename_date(self):
         """Test RTT filename parsing."""
